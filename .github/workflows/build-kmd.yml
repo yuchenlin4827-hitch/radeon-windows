@@ -33,6 +33,21 @@ jobs:
       - name: Restore WDK NuGet packages
         run: nuget restore .\packages.config -PackagesDirectory .\packages\
 
+      - name: Diagnose WDK property resolution (/pp)
+        shell: pwsh
+        run: |
+          $wdkRoot = "$env:GITHUB_WORKSPACE\packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\"
+          msbuild kmd\rokmd.vcxproj /pp:preprocessed.xml /p:Configuration=Release /p:Platform=x64 /p:WDKContentRoot="$wdkRoot" /nologo
+          Select-String -Path preprocessed.xml -Pattern '<WDKContentRoot>|<WDKBinRoot>|<InfToolPath>|<TargetPlatformVersion>|<WindowsTargetPlatformVersion>|<WindowsSdkDir>' |
+            ForEach-Object { $_.LineNumber.ToString() + ': ' + $_.Line.Trim() } | Select-Object -First 50
+
+      - name: Upload preprocessed project (diagnostics)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprocessed-${{ github.sha }}
+          path: preprocessed.xml
+
       - name: Build rokmd.sys (Release x64)
         shell: pwsh
         run: |
