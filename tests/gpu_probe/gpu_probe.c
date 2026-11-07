@@ -14,6 +14,7 @@
 //   - 控制台输出用英文标签：避免 Windows 控制台代码页对 UTF-8 中文乱码。
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 #include <initguid.h>   // 必须在 devguid.h 之前：让 DEFINE_GUID 产生定义
 #include <setupapi.h>
 #include <devguid.h>
