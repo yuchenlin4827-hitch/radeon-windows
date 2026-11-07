@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: |
           $wdkRoot = "$env:GITHUB_WORKSPACE\packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\"
-          if (-not (Test-Path "$wdkRootbin\10.0.26100.0\x64\stampinf.exe")) { Write-Error "WDK layout mismatch: stampinf not under $wdkRoot" }
+          if (-not (Test-Path "${wdkRoot}bin\10.0.26100.0\x64\stampinf.exe")) { Write-Error "WDK layout mismatch: stampinf not under $wdkRoot" }
           # WDKContentRoot 用全局属性传入：NuGet 包内 props 的三层上溯推导有误，
           # 且后续工具链导入会覆盖项目级设置，只有全局属性不可被覆盖。
           msbuild kmd\rokmd.vcxproj /t:build /p:Configuration=Release /p:Platform=x64 /p:WDKContentRoot="$wdkRoot" /m /nologo /v:m
