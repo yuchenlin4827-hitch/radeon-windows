@@ -42,7 +42,7 @@ INF 覆盖 **AMD TeraScale 全家族 306 个设备 ID**（提取自 Linux 内核
 | Vulkan 1.0 | ✅ terakan（Linux + Windows 均已演示） | Triang3l，MIT，Mesa 树 |
 | OpenGL 4.6 | ❌ r600 gallium 上限 4.5 | Windows 上需经 Zink（4.6 要求 Vulkan 1.3+ 基座） |
 | DX12 | ❌ 官方当年也只到 DX11 | 开源路径需 Vulkan 1.3 基座（vkd3d-proton 式转换层） |
-| WDDM 2.0 KMD | ❌ 缺失 ← **本项目核心攻坚点** | Linux radeon KMD 逻辑 → DXGK DDI 移植 |
+| WDDM 2.0 KMD | 🚧 骨架已就位 ← **本项目核心攻坚点** | DDI 表完整（M2.6）；硬件能力 M3 移植 |
 
 结论：**Vulkan 1.0 是唯一已经打通的开源 API**；WDDM 2.0 KMD 是最大的缺口；
 GL 4.6 与 DX12 受底层 Vulkan 版本约束，属长线目标（路线图 M5/M6 评估）。
@@ -110,7 +110,7 @@ msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 | --- | --- | --- |
 | M0 | 仓库 / CI / 探测工具 / 文档 | ✅（CI 绿灯，rokmd.sys 产出） |
 | M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 |
-| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架编译通过（CI 产出 .sys），待实机加载验证 |
+| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 M2.6：CI 绿灯产出 .sys，0x5023 DDI 表无 NULL 成员 + Escape v1 可用，待实机加载验证 |
 | M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先） |
 | M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜ |
 | M5 | Zink（GL）可行性验证：Vulkan 1.1 → GL 4.5 | ⬜ |

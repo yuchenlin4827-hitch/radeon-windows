@@ -1,8 +1,9 @@
 # 分阶段路线图（M0–M6）
 
 > 状态标记：⬜ 未开始 ｜ 🚧 进行中 ｜ ✅ 完成
-> 当前状态：**M0 完成、M2 编译通过（2026-11）**——CI 已在 windows-2022 上
-> 自动产出 rokmd.sys（WDK NuGet + VS2022），待实机加载验证。
+> 当前状态：**M0 完成；M2.5/M2.6 完成编译与 WDDM 2.0 DDI 表补全（2026-11）**
+> ——CI 在 windows-2022 上自动产出 rokmd.sys（WDK NuGet + VS2022），
+> 0x5023 范围内 DDI 表无 NULL 成员，Escape v1 查询面可用；待实机加载验证。
 
 每个阶段都有明确的"验收门"（DoD），未过验收不进入下一阶段。
 
@@ -44,13 +45,21 @@
 
 - ✅ `DriverEntry` + `DxgkInitialize` DDI 注册
 - ✅ `AddDevice`（PDO 绑定 + 上下文分配）、`StartDevice`（BAR/IRQ 资源枚举 + 日志）
-- ✅ 其余 DDI stub（返回 `STATUS_NOT_IMPLEMENTED`，KdPrint 留痕）
+- ✅ M2.5：QueryAdapterInfo（DRIVERCAPS/SEGMENT/GPUMMUCAPS）、分配/上下文/
+  进程簿记、即时完成提交模型、BuildPagingBuffer NOP、Escape v1
+- ✅ M2.6：WDK 26100 结构用法修复（StatusBlock/OpenAllocation）+
+  **0x5023 DDI 表补全**（RestartFromTimeout/GetNodeMetadata/SystemDisplay
+  系列/遗留显示面/PowerRuntime 等，共 24 个新成员；显示/GDI 路径保持
+  NOT_IMPLEMENTED）+ DRIVERCAPS.SupportSurpriseRemoval
+- ✅ Escape 契约双模式化（`kmd/src/rok_escape.h`：KMD/ICD/gpu_probe 同源
+  ABI）+ QUERY_SEGMENT_INFO + gpu_probe [4] escape 通道实测段
 - ⬜ 修复首轮 CI / 实机安装暴露的签名与 INF 问题
 - ⬜ 双机调试环境文档化（WinDbg + 1394/网络，或 Hyper-V Gen1 + 调试内核）
 
 **验收门**：实机 `pnputil /add-driver rokmd.inf /install` 后适配器以"代码 43
 （请求的资源未实现）"或"正常启动但无输出"状态稳定存在，**无 BSOD**；
-dbgview/Windbg 能看到 StartDevice 打印的 BAR 清单。
+dbgview/Windbg 能看到 StartDevice 打印的 BAR 清单；gpu_probe [4] 段对
+rokmd 适配器回显版本/PCI/能力。
 
 ## M3 —— KMD 基础硬件能力 ⬜
 
