@@ -1,8 +1,13 @@
 ;/*++
 ; rokmd.inf — Radeon Open Kernel Mode Driver（WDDM 2.0 骨架）
 ;
-; 适配器列表为 TeraScale 常见芯片 ID 示例；装卡前请用设备管理器
-; （或 gpu_probe.exe 的 PCI 段）确认实际 DEV ID 并按需增删。
+; 设备 ID 覆盖 AMD TeraScale 全家族（TS1/TS2/TS3，含 APU），共 306 个设备，
+; 来源：Linux 内核 include/drm/drm_pciids.h 的 radeon_PCI_IDS 表（GPL-2.0，
+; PCI ID 为事实数据；提取脚本见仓库 scripts 历史）。
+; 主要目标卡：HD 6490M (Seymour, 0x6840/0x6841) / HD 7470M (Caicos, 0x6779/0x677B)。
+;
+; 注意：骨架阶段（M2）对所有这些卡只做"识别与加载"，硬件能力按家族在
+; M3+ 逐步落地（优先 Seymour/Caicos）。装卡前请用 gpu_probe.exe 核对实际 DEV ID。
 ; 测试签名环境安装：bcdedit /set testsigning on 后重启，再
 ;   pnputil /add-driver rokmd.inf /install
 ;--*/
@@ -13,7 +18,7 @@ Class       = DISPLAY
 ClassGuid   = {4d36e968-e325-11ce-bfc1-08002be10318}
 Provider    = %ManufacturerName%
 CatalogFile = rokmd.cat
-DriverVer   = 11/07/2026,0.0.1.0
+DriverVer   = 11/07/2026,0.1.0.0
 PnpLockdown = 1
 
 [DestinationDirs]
@@ -29,14 +34,329 @@ rokmd.sys = 1,,
 %ManufacturerName% = Standard,NT$ARCH$
 
 [Standard.NT$ARCH$]
-; TeraScale 2 目标卡：HD 6490M (Seymour) / HD 7470M (Caicos)
-; ID 为常见值，装卡前请用 gpu_probe.exe / 设备管理器核对实际 DEV ID。
+; === 目标卡（主要验证对象）===
 %rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6840
 %rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6841
 %rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_6779
 %rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_677B
-%rokmd_Caicos7450.DeviceDesc%   = rokmd_Install, PCI\VEN_1002&DEV_6760
-%rokmd_Caicos7450.DeviceDesc%   = rokmd_Install, PCI\VEN_1002&DEV_6761
+
+; TeraScale 1 (HD 2000-4000 / R600-RV770) — 134 个设备
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_791E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_791F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9400
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9401
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9402
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9403
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9405
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_940A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_940B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_940F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9440
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9441
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9442
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9443
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9444
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9446
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_944A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_944B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_944C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_944E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9450
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9452
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9456
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_945A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_945B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_945E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9460
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9462
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_946A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_946B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_947A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_947B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9480
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9487
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9488
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9489
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_948A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_948F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9490
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9491
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9495
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9498
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_949C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_949E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_949F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94A0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94A1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94A3
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94B1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94B3
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94B4
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94B5
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94B9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C3
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C4
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C5
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C6
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C7
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94C9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94CB
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94CC
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_94CD
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9500
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9501
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9504
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9505
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9506
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9507
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9508
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9509
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_950F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9511
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9515
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9517
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9519
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9540
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9541
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9542
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_954E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_954F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9552
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9553
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9555
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9557
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_955F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9580
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9581
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9583
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9586
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9587
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9588
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9589
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_958A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_958B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_958C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_958D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_958E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_958F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9590
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9591
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9593
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9595
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9596
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9597
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9598
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9599
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_959B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C2
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C4
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C5
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C6
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C7
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95C9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95CC
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95CD
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95CE
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_95CF
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9610
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9611
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9612
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9613
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9614
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9615
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9616
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9710
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9711
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9712
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9713
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9714
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9715
+
+; TeraScale 2 Evergreen (HD 5000) — 43 个设备
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6880
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6888
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6889
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_688A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_688C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_688D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6898
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6899
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_689B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_689C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_689D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_689E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68A0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68A1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68A8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68A9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68B0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68B8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68B9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68BA
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68BE
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68BF
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68C0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68C1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68C7
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68C8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68C9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68D8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68D9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68DA
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68DE
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68E0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68E1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68E4
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68E5
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68E8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68E9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68F1
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68F2
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68F8
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68F9
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68FA
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_68FE
+
+; TeraScale 2 APU (Fusion C/E 系列) — 23 个设备
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9640
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9641
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9642
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9643
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9644
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9645
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9647
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9648
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9649
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_964A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_964B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_964C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_964E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_964F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9802
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9803
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9804
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9805
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9806
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9807
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9808
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9809
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_980A
+
+; TeraScale 2 Northern Islands (HD 6400-6900/7400) — 54 个设备
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6720
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6721
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6722
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6723
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6724
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6725
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6726
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6727
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6728
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6729
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6738
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6739
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_673E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6740
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6741
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6742
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6743
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6744
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6745
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6746
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6747
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6748
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6749
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_674A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6750
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6751
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6758
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6759
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_675B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_675D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_675F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6760
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6761
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6762
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6763
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6764
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6765
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6766
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6767
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6768
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6770
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6771
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6772
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6778
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6779
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_677B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6840
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6841
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6842
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6843
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6849
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6850
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6858
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6859
+
+; TeraScale 3 Cayman (HD 6900) — 15 个设备
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6700
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6701
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6702
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6703
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6704
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6705
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6706
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6707
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6708
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6709
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6718
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6719
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_671C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_671D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_671F
+
+; TeraScale 3 APU (Trinity/Richland) — 37 个设备
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9900
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9901
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9903
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9904
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9905
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9906
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9907
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9908
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9909
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_990A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_990B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_990C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_990D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_990E
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_990F
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9910
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9913
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9917
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9918
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9919
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9990
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9991
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9992
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9993
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9994
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9995
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9996
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9997
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9998
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_9999
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_999A
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_999B
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_999C
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_999D
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_99A0
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_99A2
+%rokmd_TeraScale.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_99A4
 
 [rokmd_Install]
 CopyFiles = rokmd_CopyFiles
@@ -59,4 +379,4 @@ ManufacturerName       = "radeon-windows project"
 DiskName               = "rokmd installation disk"
 rokmd_Seymour6490M.DeviceDesc = "Radeon Open KMD (Seymour / HD 6490M)"
 rokmd_Caicos7470M.DeviceDesc = "Radeon Open KMD (Caicos / HD 7470M)"
-rokmd_Caicos7450.DeviceDesc = "Radeon Open KMD (Caicos / HD 6450M/7450M)"
+rokmd_TeraScale.DeviceDesc = "Radeon Open KMD (AMD TeraScale)"

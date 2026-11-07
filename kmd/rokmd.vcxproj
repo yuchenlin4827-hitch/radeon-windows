@@ -25,9 +25,9 @@
     <ProjectName>rokmd</ProjectName>
     <RootNamespace>rokmd</RootNamespace>
     <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
-    <!-- WindowsTargetPlatformVersion 不在此设置：$(LatestTargetPlatformVersion)
-         在 Globals 阶段尚未定义，会展开为空导致 WDKBinRoot/stampinf 路径错误；
-         交由 WDK 的 WindowsDriver.Default.props 自动选择（10.0.26100.0）。 -->
+    <!-- 注意：WindowsTargetPlatformVersion 在 Configuration 组里显式设置为
+         10.0.26100.0（与 WDK NuGet 版本一致），使 WDKBinRoot 解析到
+         packages\...\c\bin\10.0.26100.0（stampinf 等工具所在目录）。 -->
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -38,6 +38,7 @@
     <PlatformToolset>WindowsApplicationForDrivers10.0</PlatformToolset>
     <DriverType>WDM</DriverType>
     <TargetVersion>WINDOWS10</TargetVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Driver</ConfigurationType>
@@ -45,6 +46,7 @@
     <PlatformToolset>WindowsApplicationForDrivers10.0</PlatformToolset>
     <DriverType>WDM</DriverType>
     <TargetVersion>WINDOWS10</TargetVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />

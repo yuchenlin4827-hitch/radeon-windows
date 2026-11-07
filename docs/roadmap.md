@@ -80,12 +80,13 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 
 **验收门**：干净系统（无 Catalyst）+ `rokmd.sys` + `terakan_icd.dll` → vkcube。
 
-## M5 —— OpenGL 4.6 可行性评估 ⬜
+## M5 —— OpenGL 可行性评估 ⬜
 
-- 评估 Zink（GL-on-Vulkan）在 terakan 上的上限：Zink 的 GL 4.6 要求 Vulkan 1.3
-  基座（含 timeline semaphore、dynamic rendering 等特性），TeraScale 是否可达
-  需逐特性核对（预计部分不可达 → GL 上限可能停在 4.5 附近，与 Linux r600 一致）。
-- 产出：特性差距表 + 决策（收敛到 4.5 或继续追 4.6）。
+- 主攻路线：**terakan 冲 Vulkan 1.1 → Zink → OpenGL 4.5**
+  （Zink 的 GL 4.5 要求 Vulkan 1.1；GL 4.6 要求 Vulkan 1.3，对 TeraScale
+  不设为目标——依据见 [wddm-vulkan-limits.md](wddm-vulkan-limits.md) 第 2.3 节）。
+- 产出：Vulkan 1.1 必须特性（subgroup ops、host query reset 等）在 VLIW 上的
+  逐项核对表 + 决策（上 1.1 或收敛到"纯 1.0 + 软件包装"）。
 
 ## M6 —— DX12 层评估 ⬜
 

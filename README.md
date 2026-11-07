@@ -1,23 +1,36 @@
-# hd-6490_7470_M-windows-driver
+# radeon-windows
 
 > Drivers compatible with DirectX 12, Vulkan 1.0, WDDM 2.0, and OpenGL 4.6
-> for HD 6490M or 7470M devices.（目标：HD 6490M / 7470M）
+> for HD 6490M or 7470M devices.（起点：HD 6490M / 7470M；现已扩展到 TeraScale 全家族）
 
 把 Linux 上成熟的 AMD 开源显卡栈（radeon 内核驱动 + Mesa 系用户态驱动）带回到
 Windows。目标 API：**Vulkan 1.0（terakan 路线）→ OpenGL / DX12 → 自研 WDDM 2.0
 内核驱动**。
 
-## 目标硬件
+## 支持的显卡
 
-| 卡型 | 核心 | 代际 | PCI Device ID* |
-| --- | --- | --- | --- |
-| Radeon HD 6490M | Seymour | TeraScale 2 (VLIW5) | 0x6840 / 0x6841 |
-| Radeon HD 7470M | Caicos | TeraScale 2 (VLIW5) | 0x6779 / 0x677B |
+INF 覆盖 **AMD TeraScale 全家族 306 个设备 ID**（提取自 Linux 内核
+`include/drm/drm_pciids.h` 的 radeon_PCI_IDS 表）：
 
-\* 常见 ID 列表，装卡前请用 `gpu_probe.exe` 或设备管理器核对实际值。
+| 家族 | 代表产品 | 设备数 |
+| --- | --- | --- |
+| TeraScale 1 | HD 2000–4000（R600–RV770） | 134 |
+| TeraScale 2 Evergreen | HD 5000（Cedar–Hemlock） | 43 |
+| TeraScale 2 APU | Fusion C/E 系列（Palm/Sumo） | 23 |
+| TeraScale 2 Northern Islands | HD 6400–6900 / 7400（Barts/Turks/**Caicos**） | 54 |
+| TeraScale 3 | HD 6900（Cayman）+ Trinity/Richland APU | 52 |
 
-这正是 AMD 官方 Windows 驱动支持早已冻结（~2016，Crimson Beta / Win10）的代际；
-而 Linux 侧开源栈（radeon 内核驱动、Mesa r600、terakan Vulkan 1.0）仍在活跃维护。
+主要验证对象：**HD 6490M (Seymour, 0x6840/0x6841)** 与 **HD 7470M
+(Caicos, 0x6779/0x677B)**。M3+ 的硬件能力按家族推进，Seymour/Caicos 优先。
+
+## 版本上限（WDDM / Vulkan 怎么选）
+
+详见 [docs/wddm-vulkan-limits.md](docs/wddm-vulkan-limits.md)，结论：
+
+- **WDDM**：OS 侧最新为 3.2（Win11 24H2）；本项目 KMD 锁定 **2.0 基线**
+  （Win10/11 全系兼容、与 Linux TTM/IB 模型对齐最好、新特性对 VLIW 无收益）。
+- **Vulkan**：规范最新 1.4；TeraScale 上 terakan 现实达成 **1.0**；
+  M5 评估冲 **1.1**（附带收益：Zink 可给到 GL 4.5；GL 4.6 需 Vulkan 1.3，不设为目标）。
 
 ## 现实约束（先读这个）
 
@@ -27,7 +40,7 @@ Windows。目标 API：**Vulkan 1.0（terakan 路线）→ OpenGL / DX12 → 自
 | API | TeraScale 2（Seymour/Caicos） | 备注 |
 | --- | --- | --- |
 | Vulkan 1.0 | ✅ terakan（Linux + Windows 均已演示） | Triang3l，MIT，Mesa 树 |
-| OpenGL 4.6 | ❌ r600 gallium 上限 4.5 | Windows 上需经 Zink（要求 Vulkan 1.3+ 基座） |
+| OpenGL 4.6 | ❌ r600 gallium 上限 4.5 | Windows 上需经 Zink（4.6 要求 Vulkan 1.3+ 基座） |
 | DX12 | ❌ 官方当年也只到 DX11 | 开源路径需 Vulkan 1.3 基座（vkd3d-proton 式转换层） |
 | WDDM 2.0 KMD | ❌ 缺失 ← **本项目核心攻坚点** | Linux radeon KMD 逻辑 → DXGK DDI 移植 |
 
@@ -37,28 +50,29 @@ GL 4.6 与 DX12 受底层 Vulkan 版本约束，属长线目标（路线图 M5/M
 ## 仓库结构
 
 ```
-hd-6490_7470_M-windows-driver/
+radeon-windows/
 ├── docs/
 │   ├── architecture.md        # 总体架构：WDDM 2.0 / terakan / 技术路线
-│   ├── roadmap.md             # M0–M6 分阶段计划（当前状态：M0）
+│   ├── roadmap.md             # M0–M6 分阶段计划
 │   ├── api-matrix.md          # API × GPU 代际 兼容矩阵（含来源）
+│   ├── wddm-vulkan-limits.md  # WDDM / Vulkan 版本上限调研
 │   ├── research/terakan.md    # terakan 调研笔记
 │   └── licensing.md           # MIT / GPL-2.0 许可证分析
 ├── kmd/                       # 自研 WDDM 2.0 显示微型端口（KMD）骨架
 │   ├── rokmd.vcxproj          #   VS2022 + WDK NuGet 工程
-│   ├── rokmd.inf              #   安装 INF（DISPLAY 类，含 Seymour/Caicos ID）
+│   ├── rokmd.inf              #   安装 INF（TeraScale 全家族 306 设备）
 │   └── src/                   #   DriverEntry + DXGK DDI 骨架
 ├── umd/
 │   └── README.md              # 用户态驱动（terakan 集成）计划
 ├── tests/gpu_probe/
 │   ├── gpu_probe.c            # PCI / WDDM / Vulkan 三段探测工具
 │   ├── build-mingw.sh         # Linux 下交叉编译脚本
-│   └── gpu_probe.exe          # 预编译 x64 版（llvm-mingw 交叉编译）
+│   └── gpu_probe.exe          # 预编译 x64 版
 ├── .github/workflows/
 │   ├── build-kmd.yml          # Windows Runner + WDK NuGet 自动编译 .sys
 │   └── build-gpu-probe.yml    # gpu_probe 双端构建
-├── packages.config            # WDK NuGet 包清单（微软官方 CI 方案）
-└── Directory.Build.props      # MSBuild 自动导入的 NuGet props
+├── packages.config            # WDK NuGet 包清单
+└── Directory.Build.props      # MSBuild 导入 + WDK NuGet 路径修正
 ```
 
 ## 快速开始
@@ -72,11 +86,8 @@ nuget restore .\packages.config -PackagesDirectory .\packages\
 msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
-云端：推送后 `.github/workflows/build-kmd.yml` 自动在 `windows-latest` 上产出
+云端：推送后 `.github/workflows/build-kmd.yml` 自动在 `windows-2022` 上产出
 `rokmd.sys`（见 Actions 产物）。
-
-> 骨架工程的 vcxproj / DDI 签名以 WDK 头文件为准，首次 CI 若有编译错误按报错微调即可——
-> 这是骨架阶段正常的收敛过程，修复时保持 [docs/roadmap.md](docs/roadmap.md) 的阶段定义不变。
 
 ### 2. gpu_probe（探测工具）
 
@@ -90,9 +101,8 @@ msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 
 ### 3. 安装 terakan（用户态 Vulkan，先行验证硬件）
 
-见 [docs/research/terakan.md](docs/research/terakan.md)：代码位置、支持的卡、构建与
-安装步骤。这一步**不依赖本项目 KMD**，用于先把 Vulkan 1.0 在 HD 6490M/7470M 上
-跑起来（vkcube）。
+见 [docs/research/terakan.md](docs/research/terakan.md)。这一步**不依赖本项目 KMD**，
+用于先把 Vulkan 1.0 在目标卡上跑起来（vkcube）。
 
 ## 分阶段路线图（摘要）
 
@@ -101,9 +111,9 @@ msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 | M0 | 仓库 / CI / 探测工具 / 文档 | ✅ |
 | M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 |
 | M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架已写 |
-| M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜ |
+| M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先） |
 | M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜ |
-| M5 | Zink（GL）可行性验证 | ⬜ |
+| M5 | Zink（GL）可行性验证：Vulkan 1.1 → GL 4.5 | ⬜ |
 | M6 | DX12 层评估（受 Vulkan 1.3 前置约束） | ⬜ |
 
 完整定义见 [docs/roadmap.md](docs/roadmap.md)。
@@ -120,6 +130,8 @@ msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 - [Triang3l/mesa（freedesktop GitLab 分支树）](https://gitlab.freedesktop.org/Triang3l/mesa) — terakan 驱动本体
 - [Phoronix: Terakan Vulkan Driver For Radeon HD 6000 Series Shown On Windows](https://www.phoronix.com/news/Terakan-HD-6000-VLK-Windows)（2024-04-20）
 - [Microsoft: Building Windows Driver Projects with CI and CD](https://techcommunity.microsoft.com/blog/windowsdriverdev/building-windows-driver-projects-with-ci-and-cd/4379200)（2025-02-14，WDK NuGet CI 方案）
+- [Microsoft Learn: What's new for Windows 11 graphics display drivers](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/what-s-new-for-windows-11-display-and-graphics-drivers)（WDDM 3.2）
+- [Khronos: Vulkan 1.4 发布公告](https://www.khronos.org/news/press/khronos-streamlines-development-and-deployment-of-gpu-accelerated-applications-with-vulkan-1.4)
 - [microsoft/Windows-driver-samples](https://github.com/microsoft/Windows-driver-samples) — KMD DDI 结构参考
 - [Microsoft Learn: Display & WDDM 文档](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/) — DXGK DDI 官方定义
-- Linux 内核 `drivers/gpu/drm/radeon`（GPL-2.0）— TeraScale 硬件编程序列参考
+- Linux 内核 `drivers/gpu/drm/radeon`（GPL-2.0）— TeraScale 硬件编程序列与 PCI 表来源
