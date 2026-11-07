@@ -3,6 +3,10 @@
   rokmd.vcxproj — Radeon Open Kernel Mode Driver（WDDM 2.0 骨架）
   依赖仓库根目录的 packages.config + Directory.Build.props
   （WDK NuGet，微软官方 CI 方案，见 docs/roadmap.md M0）。
+
+  结构遵循 WDK 样例工程标准顺序：
+    Globals → Microsoft.Cpp.Default.props → Configuration 组
+    → Microsoft.Cpp.props → ItemDefinitionGroup → 源文件 → Microsoft.Cpp.targets
 -->
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
@@ -24,10 +28,7 @@
     <WindowsTargetPlatformVersion>$(LatestTargetPlatformVersion)</WindowsTargetPlatformVersion>
   </PropertyGroup>
 
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings" />
-  <ImportGroup Label="Shared" />
-  <PropertyGroup Label="UserMacros" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Driver</ConfigurationType>
@@ -43,6 +44,11 @@
     <DriverType>WDM</DriverType>
     <TargetVersion>WINDOWS10</TargetVersion>
   </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <PropertyGroup Label="UserMacros" />
 
   <ItemDefinitionGroup>
     <ClCompile>
