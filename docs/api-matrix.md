@@ -3,7 +3,7 @@
 回答一个核心问题：**"Linux 的 radeon 开源驱动，各代硬件在各 API 上到底支持到哪？"**
 本项目所有目标（Vulkan 1.0 / GL 4.6 / DX12 / WDDM 2.0）都要放在这张表里校准。
 
-更新时间：2026-11。条目均附来源。
+更新时间：2026-11（r600 GL 4.6 依据 Mesa 25.2 修订）。条目均附来源。
 
 ## 1. 硬件代际速览
 
@@ -18,21 +18,27 @@
 | API | TeraScale 2/3 | GCN 1–5 | 来源 |
 | --- | --- | --- | --- |
 | **Vulkan 1.0** | ✅ **terakan**（Triang3l；Linux 成熟、Windows 已演示 HD 6800 vkcube/demo） | ✅ RADV（仅 Linux） | Phoronix 2024-04-20《Terakan … Shown On Windows》；AUR `vulkan-terakan`（"High-performance Vulkan 1.0 for AMD Terascale (HD 2000-7000)"，MIT） |
-| **Vulkan 1.3** | ❌ terakan 当前 1.0 | ✅ RADV（仅 Linux） | Mesa 文档 |
-| **OpenGL 4.6** | ❌ r600 gallium 上限 **4.5** | ✅ radeonsi（仅 Linux） | Mesa 功能矩阵（docs/features.txt） |
-| **OpenGL（Windows 开源）** | ❌ | ❌ | Zink 可达 4.6 但需 Vulkan 1.3 基座 |
+| **Vulkan 1.3** | ⚠️ terakan 当前 1.0，**M5.5 目标**（promoted 23/24/23 + 核心特性 24 项，见 vulkan13-plan.md） | ✅ RADV（仅 Linux） | vk.xml 必选特性表（`umd/vk13/`） |
+| **OpenGL 4.6** | ✅ **r600/evergreen+（Mesa 25.2 起完成，`r600_pipe.c: glsl_feature_level = family >= CHIP_CEDAR ? 460 : 330`）** | ✅ radeonsi（仅 Linux） | Mesa features.txt GL 4.6 行；Phoronix 2025-06-12 |
+| **OpenGL（Windows 开源）** | ⚠️ **主路线：R600g 原生移植**（M7，需 WDDM winsys） | ❌ | 本项目决策；Zink（GL-on-Vulkan）为备选，需 Vulkan 1.3 基座（VP_ZINK_gl46_baseline：api-version 1.3.0） |
 | **DX12（官方）** | ❌（官方当年止步 DX11） | ⚠️ 闭源 UMD | AMD 驱动支持列表 |
 | **DX12（开源路径）** | ❌ 无现实路径 | ⚠️ vkd3d-proton 式转换层（需 Vulkan 1.3） | vkd3d-proton 需求表 |
+
+> 修订记录：本表旧版记载"r600 gallium 上限 4.5"，该结论基于 2021 年前的
+> 功能矩阵；Mesa 25.2（2025-06）起 r600/evergreen+ 已完成 GL 4.6
+> （Phoronix 2025-06-12，Patrick Lerda），GL 4.6 不再依赖 Vulkan 版本。
 
 ### 结论（直接决定 roadmap）
 
 1. **Vulkan 1.0 / TeraScale 是唯一已打通的开源 API**（terakan），是项目第一落点。
-2. **GL 4.6**：开源栈里只有"GCN + radeonsi（Linux）"成立；Windows 上的开源路径
-   = Zink，前置是 Vulkan 1.3 —— 对 TeraScale 意味着 terakan 生态先补 1.3 能力，
-   这是 M5 的评估核心，**不应作为近期承诺**。
-3. **DX12**：TeraScale 连官方支持都没有（历史止步 DX11），开源路径只有
+2. **GL 4.6 主路线已锁定：R600g 原生移植**（M7）——r600/evergreen+ 在 Mesa 主线
+   已完成 GL 4.6，且 r600 无 LLVM 依赖；Windows 侧只差 WDDM winsys + WGL 前端。
+   Zink 备选路线需 Vulkan 1.3（M5.5）。
+3. **Vulkan 1.3（M5.5）**：promoted 23/24/23、无条件核心特性 24 项，
+   逐项工程评估见 [vulkan13-plan.md](vulkan13-plan.md)。
+4. **DX12**：TeraScale 连官方支持都没有（历史止步 DX11），开源路径只有
    DX12→Vulkan 转换层且同样卡 Vulkan 1.3；M6 仅评估。
-4. **WDDM 2.0 KMD**：任何代际都缺失，是本项目要补的最大空白（M2–M4）。
+5. **WDDM 2.0 KMD**：任何代际都缺失，是本项目要补的最大空白（M2–M4）。
 
 ## 3. WDDM 版本对照（内核侧）
 
@@ -54,8 +60,12 @@
   <https://learn.microsoft.com/en-us/windows-hardware/drivers/download-the-wdk>
 - Khronos Vulkan 1.0 规范 + Vulkan 功能矩阵:
   <https://registry.khronos.org/vulkan/>
-- Mesa 功能矩阵（r600/radeonsi/Zink 的 GL 能力逐条）:
-  <https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/docs/features.txt>
+- Mesa 功能矩阵（r600/radeonsi/Zink 的 GL 能力逐条，GL 4.6 → r600/evergreen+）:
+  <https://docs.mesa3d.org/features.html>
+- Mesa 机器可读 Zink 门控（VP_ZINK_gl46_baseline）:
+  <https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/VP_ZINK_requirements.json>
+- Khronos Vulkan 注册表（vk.xml：promoted 扩展与必选特性的权威源）:
+  <https://registry.khronos.org/vulkan/>
 - AMD 开源文档：TeraScale ISA、PM4/寄存器（Mesa 与 Linux 内核注释是实践参考）:
   <https://www.x.org/wiki/RadeonFeature/> 与内核源码 `drivers/gpu/drm/radeon`
 - GPUOpen（AMD 开发者站，ISA/固件资料）:

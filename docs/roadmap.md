@@ -1,7 +1,8 @@
-# 分阶段路线图（M0–M6）
+# 分阶段路线图（M0–M7）
 
 > 状态标记：⬜ 未开始 ｜ 🚧 进行中 ｜ ✅ 完成
-> 当前状态：**M0 完成（2026-11）**，M1/M2 骨架就绪。
+> 当前状态：**M0 完成（2026-11）**，M1/M2 骨架就绪；
+> 2026-11 增补 M5.5（Vulkan 1.3）与 M7（R600g GL 4.6），原 M5 保留并加注。
 
 每个阶段都有明确的"验收门"（DoD），未过验收不进入下一阶段。
 
@@ -80,7 +81,11 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 
 **验收门**：干净系统（无 Catalyst）+ `rokmd.sys` + `terakan_icd.dll` → vkcube。
 
-## M5 —— OpenGL 可行性评估 ⬜
+## M5 —— OpenGL 可行性评估 ⬜（结论已被 M5.5/M7 覆盖，保留存档）
+
+> **2026-11 更新**：Mesa 25.2 起 r600 驱动已在 evergreen+ 完成 GL 4.6，
+> OpenGL 主路线改为 **R600g 原生移植**（见 M7）；Zink 降级为备选。
+> 本节结论按 2021-2024 年的功能矩阵得出，保留存档以追溯决策过程。
 
 - 主攻路线：**terakan 冲 Vulkan 1.1 → Zink → OpenGL 4.5**
   （Zink 的 GL 4.5 要求 Vulkan 1.1；GL 4.6 要求 Vulkan 1.3，对 TeraScale
@@ -88,11 +93,45 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 - 产出：Vulkan 1.1 必须特性（subgroup ops、host query reset 等）在 VLIW 上的
   逐项核对表 + 决策（上 1.1 或收敛到"纯 1.0 + 软件包装"）。
 
+## M5.5 —— Vulkan 1.1 → 1.3 逐特性攻坚 ⬜
+
+**目标**：terakan 从 1.0 推到 Vulkan 1.3（promoted 扩展 23/24/23，
+无条件核心特性 24 项）。
+
+- 差距清单与 VLIW 可行性逐项评估：[vulkan13-plan.md](vulkan13-plan.md)
+- 门控数据与单测：`umd/vk13/`（promoted 表 + 必选特性表，纯 C11）
+- 实机审计：`tools/vk_audit/`（vk_audit.exe，逐设备报 1.1/1.2/1.3 缺口）
+
+**验收门**：vk_audit.exe 在 terakan ICD 上报 "1.3 REACHABLE"；
+vkcube + dota2-vulkan 冒烟无回归。
+
+**附带收益**：1.3 达成后，Zink 备选路线（GL 4.6-on-Vulkan）的门控全绿
+（见 [r600g-gl46.md](r600g-gl46.md) 第 5 节）。
+
 ## M6 —— DX12 层评估 ⬜
 
-- 唯一现实路径：vkd3d-proton 式 DX12→Vulkan 转换层（需 Vulkan 1.3+）。
+- 唯一现实路径：vkd3d-proton 式 DX12→Vulkan 转换层（需 Vulkan 1.3+，
+  即 M5.5 的产出）。
 - 评估其在原生 Windows（非 Wine）部署的可行性与性能预期；只做决策文档，
   不提前写代码。
+
+## M7 —— R600g 原生移植 → OpenGL 4.6 ⬜
+
+**目标**：把 Mesa r600 Gallium 驱动移植到 Windows（WDDM winsys + WGL 前端），
+在 evergreen+（TeraScale 2/3，含验证卡 Seymour/Turks、Caicos）上交付
+**OpenGL 4.6**——与 Vulkan 路线完全解耦。
+
+**依据**（源码级，见 [r600g-gl46.md](r600g-gl46.md)）：
+
+- Mesa features.txt：`GL 4.6 -- all DONE: ..., r600/evergreen+, ...`
+- `r600_pipe.c:495`：`glsl_feature_level = family >= CHIP_CEDAR ? 460 : 330`
+- Mesa 25.2（2025-06）完成 GL 4.6 曝光；r600 无 LLVM 依赖
+- 门控代码：`umd/gl46/gl46_r600g.c`（PCI 表 + cap/winsys 检查）
+
+**分批**（GL-W1…W5）：winsys 骨架 → WGL 前端 → GL 3.3 → 4.x 逐级 → 4.6 收口。
+
+**验收门**：wglinfo 报 OpenGL 4.6（HD 6490M / HD 7470M）；
+glmark2 与一致性子集无回归；干净系统（无 Catalyst）+ rokmd 下可运行。
 
 ---
 
@@ -100,4 +139,5 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 
 - **CI 固化**：每个里程碑合并后 Actions 必须绿；KMD 二进制附带测试签名说明
   （`bcdedit /set testsigning on`，见 architecture.md 风险清单）。
+  新增 `build-umd.yml`：umd 门控模块单测 + vk_audit.exe 双工具链构建。
 - **文档同步**：每阶段结论回写 `docs/`，terakan 调研页保持"活文档"。
