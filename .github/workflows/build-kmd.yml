@@ -1,5 +1,11 @@
-# 内核驱动 CI：windows-latest + WDK NuGet（微软官方方案）
+# 内核驱动 CI：windows-2022 + WDK NuGet（微软官方方案）
 # 产出：rokmd.sys / rokmd.pdb / rokmd.inf（Actions 产物下载）
+#
+# 两个关键修正（踩坑记录）：
+# 1) WDK NuGet 包内 props 的 WDKContentRoot 三层上溯推导有误，且会被后续
+#    工具链导入覆盖 —— 用 msbuild 全局属性 /p:WDKContentRoot 传入（不可覆盖）。
+# 2) StampInf 任务经 Tracker.exe 调 stampinf.exe 时依赖 PATH 解析（VSIX 场景
+#    WDK bin 在 PATH 里，NuGet 场景没有）—— 构建前把 WDK bin 目录前置到 PATH。
 name: build-kmd
 
 on:
@@ -33,51 +39,19 @@ jobs:
       - name: Restore WDK NuGet packages
         run: nuget restore .\packages.config -PackagesDirectory .\packages\
 
-      - name: Diagnose WDK property resolution (/pp)
-        shell: pwsh
-        run: |
-          $wdkRoot = "$env:GITHUB_WORKSPACE\packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\"
-          msbuild kmd\rokmd.vcxproj /pp:preprocessed.xml /p:Configuration=Release /p:Platform=x64 /p:WDKContentRoot="$wdkRoot" /nologo
-          Select-String -Path preprocessed.xml -Pattern '<WDKContentRoot>|<WDKBinRoot>|<InfToolPath>|<TargetPlatformVersion>|<WindowsTargetPlatformVersion>|<WindowsSdkDir>' |
-            ForEach-Object { $_.LineNumber.ToString() + ': ' + $_.Line.Trim() } | Select-Object -First 50
-
-      - name: Upload preprocessed project (diagnostics)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: preprocessed-${{ github.sha }}
-          path: preprocessed.xml
-
-      - name: Verbose build capture (诊断 ToolPath)
-        if: always()
-        shell: pwsh
-        run: |
-          $wdkRoot = "$env:GITHUB_WORKSPACE\packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\"
-          msbuild kmd\rokmd.vcxproj /t:build /p:Configuration=Release /p:Platform=x64 /p:WDKContentRoot="$wdkRoot" /m:1 /nologo /v:d > build-verbose.txt 2>&1
-          "msbuild exit: $LASTEXITCODE"
-          Select-String -Path build-verbose.txt -Pattern 'stampinf|InfToolPath|WDKBinRoot|Tracker\.exe|StampInf' -CaseSensitive:$false |
-            ForEach-Object { $_.LineNumber.ToString() + ': ' + $_.Line.Trim() } | Select-Object -First 80
-
-      - name: Upload verbose log (diagnostics)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-verbose-${{ github.sha }}
-          path: build-verbose.txt
-
       - name: Build rokmd.sys (Release x64)
         shell: pwsh
         run: |
           $wdkRoot = "$env:GITHUB_WORKSPACE\packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\"
           if (-not (Test-Path "${wdkRoot}bin\10.0.26100.0\x64\stampinf.exe")) { Write-Error "WDK layout mismatch: stampinf not under $wdkRoot" }
-          # WDKContentRoot 用全局属性传入：NuGet 包内 props 的三层上溯推导有误，
-          # 且后续工具链导入会覆盖项目级设置，只有全局属性不可被覆盖。
+          $env:Path = "${wdkRoot}bin\10.0.26100.0\x64;$env:Path"
           msbuild kmd\rokmd.vcxproj /t:build /p:Configuration=Release /p:Platform=x64 /p:WDKContentRoot="$wdkRoot" /m /nologo /v:m
 
       - name: Build rokmd.sys (Debug x64, 带日志断言更友好)
         shell: pwsh
         run: |
           $wdkRoot = "$env:GITHUB_WORKSPACE\packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\"
+          $env:Path = "${wdkRoot}bin\10.0.26100.0\x64;$env:Path"
           msbuild kmd\rokmd.vcxproj /t:build /p:Configuration=Debug /p:Platform=x64 /p:WDKContentRoot="$wdkRoot" /m /nologo /v:m
 
       - name: Upload artifacts
