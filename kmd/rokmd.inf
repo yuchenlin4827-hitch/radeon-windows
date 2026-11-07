@@ -1,0 +1,62 @@
+;/*++
+; rokmd.inf — Radeon Open Kernel Mode Driver（WDDM 2.0 骨架）
+;
+; 适配器列表为 TeraScale 常见芯片 ID 示例；装卡前请用设备管理器
+; （或 gpu_probe.exe 的 PCI 段）确认实际 DEV ID 并按需增删。
+; 测试签名环境安装：bcdedit /set testsigning on 后重启，再
+;   pnputil /add-driver rokmd.inf /install
+;--*/
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = DISPLAY
+ClassGuid   = {4d36e968-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = rokmd.cat
+DriverVer   = 11/07/2026,0.0.1.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+rokmd.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$
+
+[Standard.NT$ARCH$]
+; TeraScale 2 目标卡：HD 6490M (Seymour) / HD 7470M (Caicos)
+; ID 为常见值，装卡前请用 gpu_probe.exe / 设备管理器核对实际 DEV ID。
+%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6840
+%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6841
+%rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_6779
+%rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_677B
+%rokmd_Caicos7450.DeviceDesc%   = rokmd_Install, PCI\VEN_1002&DEV_6760
+%rokmd_Caicos7450.DeviceDesc%   = rokmd_Install, PCI\VEN_1002&DEV_6761
+
+[rokmd_Install]
+CopyFiles = rokmd_CopyFiles
+
+[rokmd_Install.Services]
+AddService = rokmd,%SPSVCINST_ASSOCSERVICE%,rokmd_Service_Inst
+
+[rokmd_Service_Inst]
+ServiceType   = 1                ; SERVICE_KERNEL_DRIVER
+StartType     = 3                ; SERVICE_DEMAND_START
+ErrorControl  = 1                ; SERVICE_ERROR_NORMAL
+ServiceBinary = %12%\rokmd.sys
+
+[rokmd_CopyFiles]
+rokmd.sys
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName       = "radeon-windows project"
+DiskName               = "rokmd installation disk"
+rokmd_Seymour6490M.DeviceDesc = "Radeon Open KMD (Seymour / HD 6490M)"
+rokmd_Caicos7470M.DeviceDesc = "Radeon Open KMD (Caicos / HD 7470M)"
+rokmd_Caicos7450.DeviceDesc = "Radeon Open KMD (Caicos / HD 6450M/7450M)"

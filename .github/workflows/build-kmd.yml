@@ -1,0 +1,46 @@
+# 内核驱动 CI：windows-latest + WDK NuGet（微软官方方案）
+# 产出：rokmd.sys / rokmd.pdb / rokmd.inf（Actions 产物下载）
+name: build-kmd
+
+on:
+  push:
+    paths:
+      - 'kmd/**'
+      - 'packages.config'
+      - 'Directory.Build.props'
+      - '.github/workflows/build-kmd.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-kmd:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore WDK NuGet packages
+        run: nuget restore .\packages.config -PackagesDirectory .\packages\
+
+      - name: Build rokmd.sys (Release x64)
+        run: msbuild kmd\rokmd.vcxproj /t:build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:m
+
+      - name: Build rokmd.sys (Debug x64, 带日志断言更友好)
+        run: msbuild kmd\rokmd.vcxproj /t:build /p:Configuration=Debug /p:Platform=x64 /m /nologo /v:m
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rokmd-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            kmd/**/rokmd.sys
+            kmd/**/rokmd.pdb
+            kmd/rokmd.inf
+            kmd/**/rokmd.inf

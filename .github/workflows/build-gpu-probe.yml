@@ -1,0 +1,39 @@
+# 用户态探测工具 CI：Linux mingw 交叉编译 + Windows MSVC 编译双验证
+name: build-gpu-probe
+
+on:
+  push:
+    paths:
+      - 'tests/gpu_probe/**'
+      - '.github/workflows/build-gpu-probe.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mingw-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Build gpu_probe.exe
+        run: bash tests/gpu_probe/build-mingw.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu_probe-mingw-x64
+          path: tests/gpu_probe/gpu_probe.exe
+
+  msvc-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build (MSVC, cl)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /O2 /W4 /utf-8 /Fe:gpu_probe-msvc.exe tests\gpu_probe\gpu_probe.c /link gdi32.lib setupapi.lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu_probe-msvc-x64
+          path: gpu_probe-msvc.exe
