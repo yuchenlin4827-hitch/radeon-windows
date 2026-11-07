@@ -26,7 +26,8 @@ typedef struct _LUID_CUSTOM { ULONG LowPart; LONG HighPart; } ROK_LUID;
 typedef struct _ROK_D3DKMT_ADAPTERINFO {
     ULONG   hAdapter;
     ROK_LUID AdapterLuid;
-    ULONG   Flags;
+    ULONG   NumOfSources;                    // 视频源数
+    BOOL    bPrecisePresentRegionsPreferred; // （与 WDK 26100 对齐）
 } ROK_D3DKMT_ADAPTERINFO;
 
 typedef struct _ROK_D3DKMT_ENUMADAPTERS2 {
@@ -34,17 +35,20 @@ typedef struct _ROK_D3DKMT_ENUMADAPTERS2 {
     ROK_D3DKMT_ADAPTERINFO *pAdapters;
 } ROK_D3DKMT_ENUMADAPTERS2;
 
-typedef struct _ROK_D3D_UMD_INTERFACE_VERSION {
-    union {
-        struct { USHORT MinorVer; USHORT MajorVer; };
-        ULONG Version;
-    };
-} ROK_D3D_UMD_INTERFACE_VERSION;
+// KMTUMDVERSION（d3dkmthk.h 26100）
+typedef enum _ROK_KMTUMDVERSION {
+    ROK_KMTUMDVERSION_DX9 = 0,
+    ROK_KMTUMDVERSION_DX10,
+    ROK_KMTUMDVERSION_DX11,
+    ROK_KMTUMDVERSION_DX12,
+    ROK_KMTUMDVERSION_DX12_WSA32,
+    ROK_KMTUMDVERSION_DX12_WSA64,
+} ROK_KMTUMDVERSION;
 
 #define ROK_MAX_PATH 260
 typedef struct _ROK_D3DKMT_UMDFILENAMEINFO {
-    ROK_D3D_UMD_INTERFACE_VERSION Version;
-    WCHAR UmdFileName[ROK_MAX_PATH];
+    ROK_KMTUMDVERSION Version;                  // In: UMD 版本族
+    WCHAR             UmdFileName[ROK_MAX_PATH]; // Out: UMD 文件名
 } ROK_D3DKMT_UMDFILENAMEINFO;
 
 typedef struct _ROK_D3DKMT_QUERYADAPTERINFO {
@@ -54,11 +58,39 @@ typedef struct _ROK_D3DKMT_QUERYADAPTERINFO {
     UINT  PrivateDriverDataSize;
 } ROK_D3DKMT_QUERYADAPTERINFO;
 
-#define ROK_KMTQAITYPE_UMDRIVERNAME 7   // KMTQAITYPE_UMDRIVERNAME
+#define ROK_KMTQAITYPE_UMDRIVERNAME 1   // KMTQAITYPE_UMDRIVERNAME（26100 枚举值）
 
 typedef ULONG ROK_D3DKMT_HANDLE;
 typedef NTSTATUS (WINAPI *PFN_D3DKMTEnumAdapters2)(ROK_D3DKMT_ENUMADAPTERS2 *);
 typedef NTSTATUS (WINAPI *PFN_D3DKMTQueryAdapterInfo)(ROK_D3DKMT_QUERYADAPTERINFO *);
+
+// ---- D3DKMT 设备/Escape ABI（rokmd 通道探测用，布局对 26100 核对）----
+typedef struct _ROK_D3DKMT_CREATEDEVICE {
+    ULONG hAdapter;         // in: 适配器句柄（用户态创建路径）
+    ULONG Flags;            // in: D3DKMT_CREATEDEVICEFLAGS（全零）
+    ULONG hDevice;          // out: 设备句柄
+} ROK_D3DKMT_CREATEDEVICE;
+
+typedef struct _ROK_D3DKMT_DESTROYDEVICE {
+    ULONG hDevice;          // in: 设备句柄
+} ROK_D3DKMT_DESTROYDEVICE;
+
+typedef struct _ROK_D3DKMT_ESCAPE {
+    ULONG hAdapter;         // in: 适配器句柄
+    ULONG hDevice;          // in: 设备句柄（0 = 适配器级 escape）
+    ULONG Type;             // in: D3DKMT_ESCAPETYPE（D3DKMT_ESCAPE_DRIVERPRIVATE = 0）
+    ULONG Flags;            // in: D3DDDI_ESCAPEFLAGS 位域；bit0 = HardwareAccess
+    VOID *pPrivateDriverData;      // in/out: 私有数据缓冲
+    UINT  PrivateDriverDataSize;   // in: 缓冲大小
+    ULONG hContext;         // in: 上下文句柄（可选，0）
+} ROK_D3DKMT_ESCAPE;
+
+#define ROK_D3DKMT_ESCAPE_DRIVERPRIVATE 0
+#define ROK_D3DDDI_ESCAPEFLAG_HARDWAREACCESS 0x00000001UL
+
+typedef NTSTATUS (WINAPI *PFN_D3DKMTCreateDevice)(ROK_D3DKMT_CREATEDEVICE *);
+typedef NTSTATUS (WINAPI *PFN_D3DKMTDestroyDevice)(ROK_D3DKMT_DESTROYDEVICE *);
+typedef NTSTATUS (WINAPI *PFN_D3DKMTEscape)(ROK_D3DKMT_ESCAPE *);
 
 // ---------------------------------------------------------------------------
 // Vulkan 最小 ABI（动态加载 vulkan-1.dll，无需 vulkan.h）
@@ -229,34 +261,57 @@ static void RokProbeD3DKMTAdapters(void)
     pQueryAdapterInfo = (PFN_D3DKMTQueryAdapterInfo)(void *)GetProcAddress(gdi32, "D3DKMTQueryAdapterInfo");
     if (pEnumAdapters2 == NULL || pQueryAdapterInfo == NULL)
     {
-        printf("  D3DKMT exports missing (需 Windows 8+ / WDDM 1.3+)\n");
+        printf("  D3DKMT exports missing (need Windows 8+ / WDDM 1.3+)\n");
         return;
     }
 
+    // 两段式枚举（d3dkmthk.h 契约）：第一次 pAdapters=NULL 取数量，
+    // 分配数组后第二次取数据。旧版只调一次即解引用 NULL 数组（已修）。
     ZeroMemory(&enumAdapters, sizeof(enumAdapters));
     st = pEnumAdapters2(&enumAdapters);
     if (st != 0)
     {
-        printf("  D3DKMTEnumAdapters2 failed, status=0x%08lX\n", (unsigned long)st);
+        printf("  D3DKMTEnumAdapters2 (count) failed, status=0x%08lX\n", (unsigned long)st);
+        return;
+    }
+    if (enumAdapters.NumAdapters == 0)
+    {
+        printf("  adapter count: 0\n");
+        return;
+    }
+
+    enumAdapters.pAdapters = (ROK_D3DKMT_ADAPTERINFO *)
+        HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                  sizeof(ROK_D3DKMT_ADAPTERINFO) * enumAdapters.NumAdapters);
+    if (enumAdapters.pAdapters == NULL)
+    {
+        printf("  out of memory for %lu adapters\n", enumAdapters.NumAdapters);
+        return;
+    }
+    st = pEnumAdapters2(&enumAdapters);
+    if (st != 0)
+    {
+        printf("  D3DKMTEnumAdapters2 (data) failed, status=0x%08lX\n", (unsigned long)st);
+        HeapFree(GetProcessHeap(), 0, enumAdapters.pAdapters);
         return;
     }
 
     printf("  adapter count: %lu\n", enumAdapters.NumAdapters);
-    if (enumAdapters.NumAdapters == 0)
-        return;
-
     for (i = 0; i < enumAdapters.NumAdapters; i++)
     {
         ROK_D3DKMT_QUERYADAPTERINFO qi;
         ROK_D3DKMT_UMDFILENAMEINFO umd;
+        const char *umdFamily = "unknown";
 
         printf("  ---- adapter #%lu ----\n", i);
         printf("  handle      : 0x%08lX\n", (unsigned long)enumAdapters.pAdapters[i].hAdapter);
         printf("  luid        : %08lX-%08lX\n",
                (unsigned long)enumAdapters.pAdapters[i].AdapterLuid.HighPart,
                (unsigned long)enumAdapters.pAdapters[i].AdapterLuid.LowPart);
+        printf("  sources     : %lu\n", enumAdapters.pAdapters[i].NumOfSources);
 
         ZeroMemory(&umd, sizeof(umd));
+        umd.Version = ROK_KMTUMDVERSION_DX12;
         ZeroMemory(&qi, sizeof(qi));
         qi.hAdapter = enumAdapters.pAdapters[i].hAdapter;
         qi.Type = ROK_KMTQAITYPE_UMDRIVERNAME;
@@ -265,10 +320,19 @@ static void RokProbeD3DKMTAdapters(void)
         st = pQueryAdapterInfo(&qi);
         if (st == 0)
         {
-            printf("  UMD dll     : %ls  (UMD interface v%u.%u)\n",
-                   umd.UmdFileName,
-                   umd.Version.MajorVer, umd.Version.MinorVer);
-            printf("                ^^^ 装 terakan 后预期出现 terakan 相关 DLL\n");
+            switch (umd.Version)
+            {
+            case ROK_KMTUMDVERSION_DX9:  umdFamily = "DX9";  break;
+            case ROK_KMTUMDVERSION_DX10: umdFamily = "DX10"; break;
+            case ROK_KMTUMDVERSION_DX11: umdFamily = "DX11"; break;
+            case ROK_KMTUMDVERSION_DX12: umdFamily = "DX12"; break;
+            case ROK_KMTUMDVERSION_DX12_WSA32: umdFamily = "DX12-WSA32"; break;
+            case ROK_KMTUMDVERSION_DX12_WSA64: umdFamily = "DX12-WSA64"; break;
+            default: umdFamily = "unknown"; break;
+            }
+            printf("  UMD dll     : %ls  (version family: %s)\n",
+                   umd.UmdFileName, umdFamily);
+            printf("                ^^^ terakan/rokmd 集成后此处应出现对应 DLL\n");
         }
         else
         {
@@ -282,6 +346,223 @@ static void RokProbeD3DKMTAdapters(void)
 // ---------------------------------------------------------------------------
 // [3] Vulkan（动态加载）
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// [4] rokmd Escape 通道（D3DKMTEscape → DxgkDdiEscape）
+//     直接编译共享契约头 kmd/src/rok_escape.h（ROK_PROBE_HAS_ESCAPE_ABI）。
+//     在装了 rokmd 的实机上，本段验证 M4 ICD 将使用的同一条 ABI 通路；
+//     对非 rokmd 适配器，KMD 会因魔数不符拒绝 —— 属预期结果。
+// ---------------------------------------------------------------------------
+#if ROK_PROBE_HAS_ESCAPE_ABI
+
+typedef union _ROK_ESC_OUT_BUF {
+    ROK_ESC_VERSION_OUT       version;
+    ROK_ESC_PCI_ID_OUT        pci;
+    ROK_ESC_VRAM_OUT          vram;
+    ROK_ESC_CAPS_OUT          caps;
+    ROK_ESC_SEGMENT_INFO_OUT  seg;
+    unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 64];
+} ROK_ESC_OUT_BUF;
+
+static const char *RokEscFamilyName(unsigned int family)
+{
+    switch (family)
+    {
+    case ROK_GPU_FAMILY_TS1: return "TeraScale1";
+    case ROK_GPU_FAMILY_TS2: return "TeraScale2";
+    case ROK_GPU_FAMILY_TS3: return "TeraScale3";
+    default: return "unknown";
+    }
+}
+
+static void
+RokEscSend(PFN_D3DKMTEscape pEscape, ULONG hAdapter, ULONG hDevice,
+           ROK_U32 escType, ROK_ESC_OUT_BUF *buf, unsigned int outSize,
+           NTSTATUS *status)
+{
+    ROK_D3DKMT_ESCAPE esc;
+    ROK_ESCAPE_HEADER *h = (ROK_ESCAPE_HEADER *)buf->raw;
+
+    ZeroMemory(buf, sizeof(*buf));
+    h->Magic = ROK_ESCAPE_MAGIC;
+    h->Version = ROK_ESCAPE_VERSION;
+    h->Type = (ROK_U32)escType;
+    h->Reserved = 0;
+
+    ZeroMemory(&esc, sizeof(esc));
+    esc.hAdapter = hAdapter;
+    esc.hDevice = hDevice;
+    esc.Type = ROK_D3DKMT_ESCAPE_DRIVERPRIVATE;
+    esc.Flags = ROK_D3DDDI_ESCAPEFLAG_HARDWAREACCESS;
+    esc.pPrivateDriverData = buf->raw;
+    esc.PrivateDriverDataSize = sizeof(ROK_ESCAPE_HEADER) + outSize;
+    esc.hContext = 0;
+
+    *status = pEscape(&esc);
+}
+
+static void RokProbeRokmdEscapeChannel(void)
+{
+    HMODULE gdi32;
+    PFN_D3DKMTEnumAdapters2 pEnumAdapters2;
+    PFN_D3DKMTCreateDevice pCreateDevice;
+    PFN_D3DKMTDestroyDevice pDestroyDevice;
+    PFN_D3DKMTEscape pEscape;
+    ROK_D3DKMT_ENUMADAPTERS2 enumAdapters;
+    ULONG i;
+    NTSTATUS st;
+
+    RokPrintGuidSectionHeader("[4] rokmd escape channel (D3DKMTEscape, AROK magic)");
+    printf("  contract    : rok_escape.h v%u (shared KMD/ICD ABI)\n",
+           (unsigned)ROK_ESCAPE_VERSION);
+
+    gdi32 = GetModuleHandleW(L"gdi32.dll");
+    if (gdi32 == NULL)
+        gdi32 = LoadLibraryW(L"gdi32.dll");
+    if (gdi32 == NULL)
+    {
+        printf("  gdi32.dll not loadable\n");
+        return;
+    }
+
+    pEnumAdapters2 = (PFN_D3DKMTEnumAdapters2)(void *)GetProcAddress(gdi32, "D3DKMTEnumAdapters2");
+    pCreateDevice = (PFN_D3DKMTCreateDevice)(void *)GetProcAddress(gdi32, "D3DKMTCreateDevice");
+    pDestroyDevice = (PFN_D3DKMTDestroyDevice)(void *)GetProcAddress(gdi32, "D3DKMTDestroyDevice");
+    pEscape = (PFN_D3DKMTEscape)(void *)GetProcAddress(gdi32, "D3DKMTEscape");
+    if (pEnumAdapters2 == NULL || pEscape == NULL)
+    {
+        printf("  D3DKMT escape exports missing\n");
+        return;
+    }
+
+    ZeroMemory(&enumAdapters, sizeof(enumAdapters));
+    if (pEnumAdapters2(&enumAdapters) != 0 || enumAdapters.NumAdapters == 0)
+    {
+        printf("  no adapters to probe\n");
+        return;
+    }
+    enumAdapters.pAdapters = (ROK_D3DKMT_ADAPTERINFO *)
+        HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                  sizeof(ROK_D3DKMT_ADAPTERINFO) * enumAdapters.NumAdapters);
+    if (enumAdapters.pAdapters == NULL)
+        return;
+    if (pEnumAdapters2(&enumAdapters) != 0)
+    {
+        HeapFree(GetProcessHeap(), 0, enumAdapters.pAdapters);
+        return;
+    }
+
+    for (i = 0; i < enumAdapters.NumAdapters; i++)
+    {
+        ULONG hAdapter = enumAdapters.pAdapters[i].hAdapter;
+        ROK_D3DKMT_CREATEDEVICE cd;
+        ULONG hDevice = 0;
+        ROK_ESC_OUT_BUF out;
+        ROK_ESCAPE_HEADER *h;
+
+        printf("  ---- adapter #%lu (hAdapter=0x%08lX) ----\n", i, (unsigned long)hAdapter);
+
+        // ICD 同款路径：CreateDevice → Escape(hDevice) → DestroyDevice。
+        ZeroMemory(&cd, sizeof(cd));
+        cd.hAdapter = hAdapter;
+        cd.Flags = 0;
+        st = pCreateDevice(&cd);
+        if (st == 0)
+        {
+            hDevice = cd.hDevice;
+        }
+        else
+        {
+            printf("  CreateDevice : status=0x%08lX (fallback: adapter-level hDevice=0)\n",
+                   (unsigned long)st);
+        }
+
+        // [4.1] QUERY_VERSION
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_VERSION,
+                   &out, sizeof(out.version), &st);
+        h = (ROK_ESCAPE_HEADER *)out.raw;
+        if (st == 0 && h->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_VERSION: OK  driver v%u.%u.%u  WDDM DDI=0x%08X\n",
+                   (unsigned)out.version.Major, (unsigned)out.version.Minor,
+                   (unsigned)out.version.Patch,
+                   (unsigned)out.version.WddmInterfaceVersion);
+            if (out.version.WddmInterfaceVersion == 0x5023)
+                printf("               -> WDDM 2.0 interface confirmed\n");
+        }
+        else
+        {
+            printf("  QUERY_VERSION: status=0x%08lX (non-rokmd adapter: expected)\n",
+                   (unsigned long)st);
+            if (hDevice != 0 && pDestroyDevice != NULL)
+            {
+                ROK_D3DKMT_DESTROYDEVICE dd;
+                ZeroMemory(&dd, sizeof(dd));
+                dd.hDevice = hDevice;
+                pDestroyDevice(&dd);
+            }
+            continue;
+        }
+
+        // [4.2] QUERY_PCI_ID
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_PCI_ID,
+                   &out, sizeof(out.pci), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_PCI_ID : OK  VID=0x%04X DID=0x%04X REV=0x%02X family=%s\n",
+                   (unsigned)out.pci.VendorId, (unsigned)out.pci.DeviceId,
+                   (unsigned)out.pci.RevisionId, RokEscFamilyName(out.pci.Family));
+        }
+
+        // [4.3] QUERY_VRAM
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_VRAM,
+                   &out, sizeof(out.vram), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_VRAM   : OK  vram=%llu B gart=%llu B seg=%u\n",
+                   (unsigned long long)out.vram.VramSizeBytes,
+                   (unsigned long long)out.vram.GartSizeBytes,
+                   (unsigned)out.vram.VramSegmentId);
+        }
+
+        // [4.4] QUERY_CAPS
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_CAPS,
+                   &out, sizeof(out.caps), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_CAPS   : OK  caps=0x%08X pm4=%u%s%s%s%s\n",
+                   (unsigned)out.caps.CapsMask, (unsigned)out.caps.Pm4PacketVersion,
+                   (out.caps.CapsMask & ROK_CAP_MMIO_MAPPED)   ? " [MMIO]" : "",
+                   (out.caps.CapsMask & ROK_CAP_PCI_ID_VALID)  ? " [PCI]" : "",
+                   (out.caps.CapsMask & ROK_CAP_SEGMENT_QUERY) ? " [SEGQ]" : "",
+                   (out.caps.CapsMask & ROK_CAP_VRAM_SEGMENT)  ? " [VRAM-SEG]" : "");
+        }
+
+        // [4.5] QUERY_SEGMENT_INFO（v1.1 追加；M3 前全 0）
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_SEGMENT_INFO,
+                   &out, sizeof(out.seg), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_SEGINFO: OK  vram=%llu B gart=%llu B seg=%u/%u flags=0x%X\n",
+                   (unsigned long long)out.seg.VramSizeBytes,
+                   (unsigned long long)out.seg.GartSizeBytes,
+                   (unsigned)out.seg.VramSegmentId, (unsigned)out.seg.GartSegmentId,
+                   (unsigned)out.seg.Flags);
+        }
+
+        if (hDevice != 0 && pDestroyDevice != NULL)
+        {
+            ROK_D3DKMT_DESTROYDEVICE dd;
+            ZeroMemory(&dd, sizeof(dd));
+            dd.hDevice = hDevice;
+            pDestroyDevice(&dd);
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, enumAdapters.pAdapters);
+}
+
+#endif /* ROK_PROBE_HAS_ESCAPE_ABI */
+
 static void RokProbeVulkan(void)
 {
     HMODULE vk;
@@ -392,6 +673,9 @@ int main(int argc, char **argv)
     RokProbePciDisplayDevices();
     RokProbeD3DKMTAdapters();
     RokProbeVulkan();
+#if ROK_PROBE_HAS_ESCAPE_ABI
+    RokProbeRokmdEscapeChannel();
+#endif
 
     printf("\ndone.\n");
     return 0;
