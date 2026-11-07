@@ -28,7 +28,9 @@ if [ ! -f "${VK_INCLUDE_DIR}/vulkan/vulkan_core.h" ]; then
              vulkan_video_codec_h264std_decode.h vulkan_video_codec_h264std_encode.h \
              vulkan_video_codec_h265std_decode.h vulkan_video_codec_h265std_encode.h \
              vulkan_video_codec_av1std.h vulkan_video_codec_av1std_decode.h \
-             vulkan_video_codec_av1std_encode.h vulkan_video_codecs_common.h; do
+             vulkan_video_codec_av1std_encode.h \
+             vulkan_video_codec_vp9std.h vulkan_video_codec_vp9std_decode.h \
+             vulkan_video_codecs_common.h; do
         curl -sSfL -o "${VK_INCLUDE_DIR}/vk_video/${h}" "${BASE}/${h}"
     done
 fi
