@@ -126,12 +126,12 @@ RokDdiQueryAdapterInfo(
     switch (pQueryAdapterInfo->Type)
     {
     case DXGKQAITYPE_DRIVERCAPS:
-        // 全零 DRIVER_CAPS = 声明"最朴素的驱动能力"，足够让适配器进入工作状态。
-        if (pQueryAdapterInfo->OutputDataSize < sizeof(DRIVER_CAPS))
+        // 全零 DXGK_DRIVERCAPS = 声明"最朴素的驱动能力"，足够让适配器进入工作状态。
+        if (pQueryAdapterInfo->OutputDataSize < sizeof(DXGK_DRIVERCAPS))
         {
             return STATUS_BUFFER_TOO_SMALL;
         }
-        RtlZeroMemory(pQueryAdapterInfo->pOutputData, sizeof(DRIVER_CAPS));
+        RtlZeroMemory(pQueryAdapterInfo->pOutputData, sizeof(DXGK_DRIVERCAPS));
         return STATUS_SUCCESS;
 
     default:
@@ -246,7 +246,7 @@ RokDdiSubmitCommand(
 {
     // M3 核心：把 OS 递交的 DMA buffer 以 PM4 INDIRECT_BUFFER 形式
     // 写入 CP ring（对照 Linux radeon 的 radeon_ring_commit / r600_ib_*）。
-    UNREFERENCED_PARAMETER(hContext);
+    UNREFERENCED_PARAMETER(hAdapter);
     UNREFERENCED_PARAMETER(pSubmitCommand);
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "rokmd: SubmitCommand (stub!)\n"));
 }
@@ -276,13 +276,15 @@ RokDdiBuildPagingBuffer(
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "rokmd: BuildPagingBuffer (stub!)\n"));
 }
 
-CALLBACK
+NTSTATUS
 RokDdiResetFromTimeout(
     IN_CONST_HANDLE hAdapter
     )
 {
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiResetFromTimeout (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS

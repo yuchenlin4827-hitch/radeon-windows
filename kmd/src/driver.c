@@ -22,7 +22,6 @@ DriverEntry(
                "rokmd: DriverEntry — Radeon Open KMD, WDDM 2.0 skeleton (M2)\n"));
 
     RtlZeroMemory(&g_DdiData, sizeof(g_DdiData));
-    g_DdiData.Size    = sizeof(g_DdiData);
     g_DdiData.Version = DXGKDDI_INTERFACE_VERSION;
 
     // ---- 生命周期（adapter.h）----

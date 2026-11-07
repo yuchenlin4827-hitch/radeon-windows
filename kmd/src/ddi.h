@@ -127,7 +127,7 @@ RokDdiBuildPagingBuffer(
     IN_PDXGKARG_BUILDPAGINGBUFFER pBuildPagingBuffer
     );
 
-CALLBACK
+NTSTATUS
 RokDdiResetFromTimeout(
     IN_CONST_HANDLE hAdapter
     );
