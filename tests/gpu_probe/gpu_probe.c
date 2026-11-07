@@ -133,6 +133,44 @@ typedef int (*PFN_rok_vkEnumeratePhysicalDevices)(ROK_VkInstance,
                                                   unsigned int *, ROK_VkPhysicalDevice *);
 typedef void (*PFN_rok_vkGetPhysicalDeviceProperties)(ROK_VkPhysicalDevice, void *);
 
+typedef struct _ROK_VkExtensionProperties {
+    char         extensionName[256];
+    unsigned int specVersion;
+} RokVkExtensionProperties;
+
+typedef struct _ROK_VkExtent3D { unsigned int width, height, depth; } RokVkExtent3D;
+
+typedef struct _ROK_VkQueueFamilyProperties {
+    unsigned int  queueFlags;
+    unsigned int  queueCount;
+    unsigned int  timestampValidBits;
+    RokVkExtent3D minImageTransferGranularity;
+} RokVkQueueFamilyProperties;
+
+typedef struct _ROK_VkMemoryType {
+    unsigned int propertyFlags;
+    unsigned int heapIndex;
+} RokVkMemoryType;
+
+typedef struct _ROK_VkMemoryHeap {
+    unsigned long long size;
+    unsigned int       flags;
+} RokVkMemoryHeap;
+
+typedef struct _ROK_VkPhysicalDeviceMemoryProperties {
+    unsigned int    memoryTypeCount;
+    RokVkMemoryType memoryTypes[32];
+    unsigned int    memoryHeapCount;
+    RokVkMemoryHeap memoryHeaps[16];
+} RokVkPhysicalDeviceMemoryProperties;
+
+typedef int (*PFN_rok_vkEnumerateDeviceExtensionProperties)(
+    ROK_VkPhysicalDevice, const char *, unsigned int *, void *);
+typedef void (*PFN_rok_vkGetPhysicalDeviceQueueFamilyProperties)(
+    ROK_VkPhysicalDevice, unsigned int *, RokVkQueueFamilyProperties *);
+typedef void (*PFN_rok_vkGetPhysicalDeviceMemoryProperties)(
+    ROK_VkPhysicalDevice, RokVkPhysicalDeviceMemoryProperties *);
+
 // ---------------------------------------------------------------------------
 // 工具
 // ---------------------------------------------------------------------------
@@ -341,6 +379,60 @@ static void RokProbeD3DKMTAdapters(void)
     }
 
     HeapFree(GetProcessHeap(), 0, enumAdapters.pAdapters);
+}
+
+// ---------------------------------------------------------------------------
+// [2.5] Vulkan ICD 清单（loader 发现机制：注册表 Khronos\Vulkan\Drivers）
+// ---------------------------------------------------------------------------
+static void RokProbeVulkanIcdRegistry(void)
+{
+    static const struct { HKEY root; const wchar_t *label; } roots[] = {
+        { HKEY_LOCAL_MACHINE, L"HKLM" },
+        { HKEY_CURRENT_USER,  L"HKCU" },
+    };
+    DWORD r;
+
+    printf("\n================================================================\n");
+    printf(" [2.5] Vulkan ICD manifests (registry Khronos\\Vulkan\\Drivers)\n");
+    printf("================================================================\n");
+
+    for (r = 0; r < 2; r++)
+    {
+        HKEY hKey;
+        DWORD index = 0;
+        wchar_t name[512];
+        DWORD nameLen = 512;
+        BYTE data[64];
+        DWORD dataSize = sizeof(data);
+        DWORD type = 0;
+
+        if (RegOpenKeyExW(roots[r].root, L"SOFTWARE\\Khronos\\Vulkan\\Drivers",
+                          0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        {
+            printf("  %s: (no key)\n", roots[r].label);
+            continue;
+        }
+
+        printf("  %s:\\SOFTWARE\\Khronos\\Vulkan\\Drivers:\n", roots[r].label);
+        while (RegEnumValueW(hKey, index++, name, &nameLen, NULL,
+                             &type, data, &dataSize) == ERROR_SUCCESS)
+        {
+            printf("    %ls\n", name);
+            nameLen = 512;
+            dataSize = sizeof(data);
+        }
+        if (index == 1)
+            printf("    (empty)\n");
+        RegCloseKey(hKey);
+    }
+
+    {
+        char buf[1024];
+        DWORD sz = sizeof(buf);
+        if (GetEnvironmentVariableA("VK_ICD_FILENAMES", buf, &sz) > 0 ||
+            GetEnvironmentVariableA("VK_DRIVER_FILES", buf, &sz) > 0)
+            printf("  env override: %s\n", buf);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +662,9 @@ static void RokProbeVulkan(void)
     PFN_rok_vkEnumerateInstanceExtensionProperties pEnumInstanceExts;
     PFN_rok_vkEnumeratePhysicalDevices pEnumDevices;
     PFN_rok_vkGetPhysicalDeviceProperties pGetProps;
+    PFN_rok_vkEnumerateDeviceExtensionProperties pEnumDeviceExts;
+    PFN_rok_vkGetPhysicalDeviceQueueFamilyProperties pQueueFamilies;
+    PFN_rok_vkGetPhysicalDeviceMemoryProperties pMemProps;
     ROK_VkInstance instance = NULL;
     ROK_VkInstanceCreateInfo ci;
     unsigned int n = 0, i;
@@ -590,6 +685,12 @@ static void RokProbeVulkan(void)
 
     pEnumInstanceExts = (PFN_rok_vkEnumerateInstanceExtensionProperties)
         (void *)GetProcAddress(vk, "vkEnumerateInstanceExtensionProperties");
+    pEnumDeviceExts = (PFN_rok_vkEnumerateDeviceExtensionProperties)
+        (void *)GetProcAddress(vk, "vkEnumerateDeviceExtensionProperties");
+    pQueueFamilies = (PFN_rok_vkGetPhysicalDeviceQueueFamilyProperties)
+        (void *)GetProcAddress(vk, "vkGetPhysicalDeviceQueueFamilyProperties");
+    pMemProps = (PFN_rok_vkGetPhysicalDeviceMemoryProperties)
+        (void *)GetProcAddress(vk, "vkGetPhysicalDeviceMemoryProperties");
     pCreateInstance = (PFN_rok_vkCreateInstance)(void *)GetProcAddress(vk, "vkCreateInstance");
     pEnumDevices = (PFN_rok_vkEnumeratePhysicalDevices)(void *)GetProcAddress(vk, "vkEnumeratePhysicalDevices");
     pGetProps = (PFN_rok_vkGetPhysicalDeviceProperties)(void *)GetProcAddress(vk, "vkGetPhysicalDeviceProperties");
@@ -656,6 +757,65 @@ static void RokProbeVulkan(void)
                props->vendorID == 0x1002 ? "  (AMD)" : "");
         printf("  deviceID    : 0x%04X\n", props->deviceID);
         printf("  deviceType  : %s\n", RokVkDeviceType(props->deviceType));
+
+        if (pEnumDeviceExts != NULL)
+        {
+            unsigned int extCount = 0;
+            if (pEnumDeviceExts(devices[i], NULL, &extCount, NULL) == 0 && extCount > 0)
+            {
+                RokVkExtensionProperties *exts = (RokVkExtensionProperties *)
+                    HeapAlloc(GetProcessHeap(), 0, sizeof(RokVkExtensionProperties) * extCount);
+                if (exts != NULL &&
+                    pEnumDeviceExts(devices[i], NULL, &extCount, exts) == 0)
+                {
+                    unsigned int e;
+                    printf("  deviceExts  : %u\n", extCount);
+                    for (e = 0; e < extCount; e++)
+                        printf("                %s (spec %u.%u.%u)\n", exts[e].extensionName,
+                               exts[e].specVersion >> 22,
+                               (exts[e].specVersion >> 12) & 0x3FF,
+                               exts[e].specVersion & 0xFFF);
+                }
+                if (exts != NULL)
+                    HeapFree(GetProcessHeap(), 0, exts);
+            }
+        }
+
+        if (pQueueFamilies != NULL)
+        {
+            unsigned int famCount = 0, f;
+            pQueueFamilies(devices[i], &famCount, NULL);
+            if (famCount > 0 && famCount <= 32)
+            {
+                RokVkQueueFamilyProperties *fams = (RokVkQueueFamilyProperties *)
+                    HeapAlloc(GetProcessHeap(), 0, sizeof(RokVkQueueFamilyProperties) * famCount);
+                if (fams != NULL)
+                {
+                    pQueueFamilies(devices[i], &famCount, fams);
+                    printf("  queueFamily : %u\n", famCount);
+                    for (f = 0; f < famCount; f++)
+                        printf("                #%u flags=%#x count=%u%s%s\n", f,
+                               fams[f].queueFlags, fams[f].queueCount,
+                               (fams[f].queueFlags & 1) ? " graphics" : "",
+                               (fams[f].queueFlags & 2) ? " compute" : "");
+                }
+                HeapFree(GetProcessHeap(), 0, fams);
+            }
+        }
+
+        if (pMemProps != NULL)
+        {
+            RokVkPhysicalDeviceMemoryProperties mem;
+            unsigned int h;
+            ZeroMemory(&mem, sizeof(mem));
+            pMemProps(devices[i], &mem);
+            printf("  memory      : %u heaps, %u types\n",
+                   mem.memoryHeapCount, mem.memoryTypeCount);
+            for (h = 0; h < mem.memoryHeapCount && h < 8; h++)
+                printf("                heap #%u: %lluMB%s\n", h,
+                       (unsigned long long)(mem.memoryHeaps[h].size / (1024 * 1024)),
+                       (mem.memoryHeaps[h].flags & 1) ? " (device-local)" : "");
+        }
     }
 
     HeapFree(GetProcessHeap(), 0, devices);
@@ -672,6 +832,7 @@ int main(int argc, char **argv)
 
     RokProbePciDisplayDevices();
     RokProbeD3DKMTAdapters();
+    RokProbeVulkanIcdRegistry();
     RokProbeVulkan();
 #if ROK_PROBE_HAS_ESCAPE_ABI
     RokProbeRokmdEscapeChannel();

@@ -1,12 +1,16 @@
 # 用户态驱动（UMD / ICD）—— terakan 集成计划
 
-本目录未来承载两个东西：
+本目录承载两件事：
 
 1. **terakan 的 CI 构建与打包**（M1）
    - 源：`https://gitlab.freedesktop.org/Triang3l/mesa`（terakan 子树）
    - 产物：`terakan_icd.dll` + `terakan_icd.x86_64.json`（Vulkan ICD 清单）
-   - 安装：JSON 放入 `%SYSTEMROOT%\System32\`（或设置环境变量
-     `VK_ICD_FILENAMES` 指向该 JSON），Loader 即可枚举。
+   - 安装：`install-terakan.ps1`（复制 DLL、写 ICD JSON、注册到
+     `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` —— Vulkan loader 的 Windows
+     ICD 发现机制），或临时设置环境变量
+     `VK_ICD_FILENAMES=<json 路径>` 直接测试；
+   - 验证：`tests/vk_smoke/vk_smoke.exe`（端到端 compute，PASS = 全链路
+     打通）→ `vkcube`（M1 验收门）。
    - 调研与依赖边界结论见 [../docs/research/terakan.md](../docs/research/terakan.md)
 
 2. **M4：terakan winsys → 自研 rokmd 对接层**
@@ -14,9 +18,42 @@
      `kmd/` 的 WDDM 2.0 DDI。
    - 前置：M3 完成（KMD 具备 ring 提交与驻留能力）。
 
+## KMD ⇄ ICD 私有通道（M4 契约，现已可用）
+
+KMD 通过 `DxgkDdiEscape` 提供**版本化私有查询通道**，契约头
+[kmd/src/rok_escape.h](../kmd/src/rok_escape.h)（KMD 与 ICD 共用同一头文件编译）：
+
+| Escape 类型 | 输出 | 说明 |
+| --- | --- | --- |
+| `ROK_ESC_TYPE_QUERY_VERSION` | `ROK_ESC_VERSION_OUT` | 驱动版本 + WDDM DDI 版本 |
+| `ROK_ESC_TYPE_QUERY_PCI_ID` | `ROK_ESC_PCI_ID_OUT` | VID/DID/REV + TeraScale 家族（1/2/3） |
+| `ROK_ESC_TYPE_QUERY_VRAM` | `ROK_ESC_VRAM_OUT` | 显存/GTT 尺寸（M3 前为 0） |
+| `ROK_ESC_TYPE_QUERY_CAPS` | `ROK_ESC_CAPS_OUT` | 能力位（MMIO/PM4/IH/VRAM 段就绪标记） |
+
+报文格式：缓冲区 = `[ROK_ESCAPE_HEADER][OUT]`（16 字节头 + 输出体），
+magic = `0x4B4F5241`，version = 1。IUserModeDriver 经
+`D3DKMTEscape(hAdapter, ...)` 调用，OS 转交 KMD。
+
+**已打通的 KMD 能力面**（M2.5，2026-11）：
+
+- 适配器加载/启动：PCI 标识读取（DxgkCbReadDeviceSpace）、BAR0 MMIO 映射
+  （DxgkCbMapMemory）、LUID 日志；
+- 分配生命周期：CreateAllocation/DestroyAllocation/OpenAllocation/
+  CloseAllocation 簿记（0 段模式下 VidMm 以系统内存承载）；
+- 上下文与提交：CreateContext（64KB DMA buffer、免 patch）→
+  SubmitCommand/SubmitCommandVirtual **即时完成模型**（fence 立即置位，
+  OS 经 QueryCurrentFence 轮询回收，无 IH 前不会假死/TDR）；
+- BuildPagingBuffer：写入 TeraScale PM4 type-3 NOP（0xC0001000），
+  M3 在此生成 r600 VM 页表更新包。
+
+M4 时 ICD 的命令流（PM4 INDIRECT_BUFFER）经 `SubmitCommandVirtual`
+提交，进度经 escape 通道的 fence 查询对齐 —— 即 terakan winsys 的
+自研 KMD 后端形态。
+
 ## 当前状态
 
-占位目录。M1 启动前不需要任何代码。
+- ICD JSON 模板 + 安装脚本已就位（本目录）。
+- M1 启动前 terakan 本体仍需从 Triang3l/mesa 构建（CI 管线待建）。
 
 ### 为什么用户态先行
 
