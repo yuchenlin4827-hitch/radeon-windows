@@ -1,31 +1,132 @@
 // SPDX-License-Identifier: MIT
-// DXGK DDI 骨架实现（stub）。
-//
-// 现阶段除三处外全部返回 STATUS_NOT_IMPLEMENTED：
-//   1) QueryAdapterInfo(DRIVERCAPS)：交回全零能力表，保证 OS 能完成适配器初始化；
-//   2) CreateDevice/DestroyDevice：分配/释放最小设备上下文；
-//   3) 中断回调：FALSE/VOID（未启用硬件中断前不会触发）。
-// M3 起按 roadmap 逐个落地（寄存器访问 → VRAM → ring → IH）。
+// DXGK DDI 骨架实现（stub）—— 由 scripts/gen_ddi2.py 生成，签名勿手改。
+// M3 起按 roadmap 逐个落地真实实现。
 #include "precomp.h"
 #include "adapter.h"
 #include "ddi.h"
 
-// ---------------- 适配器级 ----------------
+NTSTATUS
+RokDdiDispatchIoRequest(
+    IN_CONST_PVOID MiniportDeviceContext,
+    IN_ULONG VidPnSourceId,
+    IN_PVIDEO_REQUEST_PACKET VideoRequestPacket
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiDispatchIoRequest (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiQueryChildRelations(
+    IN_CONST_PVOID MiniportDeviceContext,
+    _Inout_updates_bytes_(ChildRelationsSize) PDXGK_CHILD_DESCRIPTOR ChildRelations,
+    _In_ ULONG ChildRelationsSize
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiQueryChildRelations (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiQueryChildStatus(
+    IN_CONST_PVOID MiniportDeviceContext,
+    INOUT_PDXGK_CHILD_STATUS ChildStatus,
+    IN_BOOLEAN NonDestructiveOnly
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiQueryChildStatus (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiQueryDeviceDescriptor(
+    IN_CONST_PVOID MiniportDeviceContext,
+    IN_ULONG ChildUid,
+    INOUT_PDXGK_DEVICE_DESCRIPTOR DeviceDescriptor
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiQueryDeviceDescriptor (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiSetPowerState(
+    IN_CONST_PVOID MiniportDeviceContext,
+    IN_ULONG DeviceUid,
+    IN_DEVICE_POWER_STATE DevicePowerState,
+    IN_POWER_ACTION ActionType
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
+    UNREFERENCED_PARAMETER(DeviceUid);
+    UNREFERENCED_PARAMETER(ActionType);
+    // 骨架阶段接受任何电源状态请求（不做硬件操作）。
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: SetPowerState state=%d\n", DevicePowerState));
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+RokDdiNotifyAcpiEvent(
+    IN_CONST_PVOID MiniportDeviceContext,
+    IN_DXGK_EVENT_TYPE EventType,
+    IN_ULONG Event,
+    IN_PVOID Argument,
+    OUT_PULONG AcpiFlags
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiNotifyAcpiEvent (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiQueryInterface(
+    IN_CONST_PVOID MiniportDeviceContext,
+    IN_PQUERY_INTERFACE QueryInterface
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiQueryInterface (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiGetChildContainerId(
+    _In_ PVOID MiniportDeviceContext,
+    _In_ ULONG ChildUid,
+    _Inout_ PDXGK_CHILD_CONTAINER_ID ContainerId
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiGetChildContainerId (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
 
 NTSTATUS
 RokDdiQueryAdapterInfo(
-    _In_ CONST HANDLE                    hAdapter,
-    _In_ CONST DXGKARG_QUERYADAPTERINFO* pQueryAdapterInfo
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_QUERYADAPTERINFO pQueryAdapterInfo
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
 
     switch (pQueryAdapterInfo->Type)
     {
     case DXGKQAITYPE_DRIVERCAPS:
-        // 全零 DRIVER_CAPS = 声明"最朴素的驱动能力"：
-        // 无 2D 加速、无覆盖、无日志段——骨架阶段足够让适配器进入工作状态。
+        // 全零 DRIVER_CAPS = 声明"最朴素的驱动能力"，足够让适配器进入工作状态。
         if (pQueryAdapterInfo->OutputDataSize < sizeof(DRIVER_CAPS))
         {
             return STATUS_BUFFER_TOO_SMALL;
@@ -42,44 +143,31 @@ RokDdiQueryAdapterInfo(
 
 NTSTATUS
 RokDdiCreateDevice(
-    _In_ HANDLE                  hAdapter,
-    _Inout_ DXGKARG_CREATEDEVICE* pCreateDevice
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_CREATEDEVICE pCreateDevice
     )
 {
-    // 设备上下文：骨架阶段只存回链适配器指针。
-    PROK_DEVICE device;
-
     PAGED_CODE();
     UNREFERENCED_PARAMETER(hAdapter);
 
-    device = (PROK_DEVICE)ExAllocatePoolWithTag(PagedPool, sizeof(ROK_DEVICE), ROK_POOL_TAG);
-    if (device == NULL)
     {
-        return STATUS_INSUFFICIENT_RESOURCES;
+        PROK_DEVICE device = (PROK_DEVICE)ExAllocatePoolWithTag(PagedPool, sizeof(ROK_DEVICE), ROK_POOL_TAG);
+        if (device == NULL)
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        RtlZeroMemory(device, sizeof(ROK_DEVICE));
+        device->hAdapter = hAdapter;
+        pCreateDevice->hDevice = device;
     }
-    RtlZeroMemory(device, sizeof(ROK_DEVICE));
-    device->hAdapter = hAdapter;
-
-    pCreateDevice->hDevice = device;
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: CreateDevice\n"));
     return STATUS_SUCCESS;
 }
 
 NTSTATUS
-RokDdiCloseAdapter(
-    _In_ CONST DXGKARG_CLOSEADAPTER* pCloseAdapter
-    )
-{
-    PAGED_CODE();
-    UNREFERENCED_PARAMETER(pCloseAdapter);
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: CloseAdapter\n"));
-    return STATUS_SUCCESS;
-}
-
-VOID
 RokDdiDestroyDevice(
-    _In_ HANDLE hDevice
+    IN_CONST_HANDLE hDevice
     )
 {
     PAGED_CODE();
@@ -92,86 +180,68 @@ RokDdiDestroyDevice(
 
 NTSTATUS
 RokDdiCreateAllocation(
-    _In_ CONST HANDLE                 hAdapter,
-    _Inout_ DXGKARG_CREATEALLOCATION* pCreateAllocation
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_CREATEALLOCATION pCreateAllocation
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
     PAGED_CODE();
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
-               "rokmd: CreateAllocation count=%u (stub)\n",
-               pCreateAllocation->AllocationCount));
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiCreateAllocation (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiDestroyAllocation(
-    _In_ CONST HANDLE                    hAdapter,
-    _In_ CONST DXGKARG_DESTROYALLOCATION* pDestroyAllocation
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_DESTROYALLOCATION pDestroyAllocation
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pDestroyAllocation);
     PAGED_CODE();
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: DestroyAllocation (stub)\n"));
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiDestroyAllocation (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiDescribeAllocation(
-    _In_ CONST HANDLE                   hAdapter,
-    _Inout_ DXGKARG_DESCRIBEALLOCATION* pDescribeAllocation
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_DESCRIBEALLOCATION pDescribeAllocation
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pDescribeAllocation);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiDescribeAllocation (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiGetStandardAllocationDriverData(
-    _In_ CONST HANDLE                                  hAdapter,
-    _Inout_ DXGKARG_GETSTANDARDALLOCATIONDRIVERDATA*    pGetStandardAllocationDriverData
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_GETSTANDARDALLOCATIONDRIVERDATA pGetStandardAllocationDriverData
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pGetStandardAllocationDriverData);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiGetStandardAllocationDriverData (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
-
-// ---------------- 上下文 / 命令 ----------------
 
 NTSTATUS
-RokDdiCreateContext(
-    _In_ HANDLE                  hDevice,
-    _Inout_ DXGKARG_CREATECONTEXT* pCreateContext
+RokDdiPatch(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_PATCH pPatch
     )
 {
-    UNREFERENCED_PARAMETER(hDevice);
     PAGED_CODE();
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
-               "rokmd: CreateContext engine=%u (stub)\n",
-               pCreateContext->EngineAffinity));
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiPatch (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
-VOID
-RokDdiDestroyContext(
-    _In_ HANDLE hDevice,
-    _In_ HANDLE hContext
-    )
-{
-    UNREFERENCED_PARAMETER(hDevice);
-    UNREFERENCED_PARAMETER(hContext);
-    PAGED_CODE();
-}
-
-VOID
+NTSTATUS
 RokDdiSubmitCommand(
-    _In_ CONST HANDLE             hContext,
-    _In_ PDXGKARG_SUBMITCOMMAND   pSubmitCommand
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SUBMITCOMMAND pSubmitCommand
     )
 {
     // M3 核心：把 OS 递交的 DMA buffer 以 PM4 INDIRECT_BUFFER 形式
@@ -183,32 +253,20 @@ RokDdiSubmitCommand(
 
 NTSTATUS
 RokDdiPreemptCommand(
-    _In_ CONST HANDLE                    hContext,
-    _In_ CONST DXGKARG_PREEMPTCOMMAND*   pPreemptCommand
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_PREEMPTCOMMAND pPreemptCommand
     )
 {
-    UNREFERENCED_PARAMETER(hContext);
-    UNREFERENCED_PARAMETER(pPreemptCommand);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiPreemptCommand (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
-VOID
-RokDdiPatch(
-    _In_ CONST HANDLE         hAdapter,
-    _In_ CONST DXGKARG_PATCH* pPatch
-    )
-{
-    // 重定位补丁：分配地址落定后回填 DMA buffer 中的地址槽。
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pPatch);
-    PAGED_CODE();
-}
-
-VOID
+NTSTATUS
 RokDdiBuildPagingBuffer(
-    _In_ CONST HANDLE                  hAdapter,
-    _Inout_ DXGKARG_BUILDPAGINGBUFFER* pBuildPagingBuffer
+    IN_CONST_HANDLE hAdapter,
+    IN_PDXGKARG_BUILDPAGINGBUFFER pBuildPagingBuffer
     )
 {
     // VidMm 请求生成页表迁移命令（对应 radeon 的 GART/VM 更新包）。
@@ -218,321 +276,191 @@ RokDdiBuildPagingBuffer(
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "rokmd: BuildPagingBuffer (stub!)\n"));
 }
 
-VOID
+CALLBACK
 RokDdiResetFromTimeout(
-    _In_ CONST PVOID MiniportDeviceContext
+    IN_CONST_HANDLE hAdapter
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    // TDR：OS 判定 GPU 挂死后调用。M3 起实现 GRBM 软复位 + ring 重置。
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "rokmd: ResetFromTimeout (stub)\n"));
-}
-
-// ---------------- 渲染 / 显示 ----------------
-
-NTSTATUS
-RokDdiRender(
-    _In_ CONST HANDLE       hContext,
-    _Inout_ DXGKARG_RENDER* pRender
-    )
-{
-    UNREFERENCED_PARAMETER(hContext);
-    UNREFERENCED_PARAMETER(pRender);
     PAGED_CODE();
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-VOID
-RokDdiPresent(
-    _In_ CONST HANDLE       hContext,
-    _Inout_ DXGKARG_PRESENT* pPresent
-    )
-{
-    UNREFERENCED_PARAMETER(hContext);
-    UNREFERENCED_PARAMETER(pPresent);
-    // render-only 骨架不会走到这里（StartDevice 报告 0 路 source）。
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiResetFromTimeout (stub)\n"));
 }
 
 NTSTATUS
 RokDdiEscape(
-    _In_ CONST HANDLE        hAdapter,
-    _In_ CONST DXGKARG_ESCAPE* pEscape
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_ESCAPE pEscape
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pEscape);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiEscape (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
-VOID
+NTSTATUS
 RokDdiCollectDbgInfo(
-    _In_ CONST PVOID                MiniportDeviceContext,
-    _In_ PDXGKARG_COLLECTDBGINFO    pCollectDbgInfo
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_COLLECTDBGINFO pCollectDbgInfo
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(pCollectDbgInfo);
-}
-
-// ---------------- PnP / 电源 / 子设备 ----------------
-
-NTSTATUS
-RokDdiQueryChildStatus(
-    _In_  CONST PVOID               MiniportDeviceContext,
-    _Inout_ DXGKARG_QUERYCHILDSTATUS* pChildStatus,
-    _In_  BOOLEAN                   NonDestructiveOnly
-    )
-{
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(NonDestructiveOnly);
-    UNREFERENCED_PARAMETER(pChildStatus);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiCollectDbgInfo (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
-RokDdiQueryDeviceRelations(
-    _In_    CONST PVOID                    MiniportDeviceContext,
-    _In_    ULONG                          ChildIndex,
-    _Inout_ PDXGK_DEVICE_RELATIONS_TYPE    DeviceRelationsType
+RokDdiCreateContext(
+    IN_CONST_HANDLE hDevice,
+    INOUT_PDXGKARG_CREATECONTEXT pCreateContext
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(ChildIndex);
-    UNREFERENCED_PARAMETER(DeviceRelationsType);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiCreateContext (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
-RokDdiQueryDescriptor(
-    _In_    CONST PVOID                MiniportDeviceContext,
-    _In_    ULONG                      ChildIndex,
-    _In_    DEVICE_DESCRIPTOR_TYPE     DescriptorType,
-    _Inout_ PVOID                      DescriptorBuffer,
-    _Inout_ ULONG                      DescriptorBufferSize
+RokDdiDestroyContext(
+    IN_CONST_HANDLE hContext
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(ChildIndex);
-    UNREFERENCED_PARAMETER(DescriptorType);
-    UNREFERENCED_PARAMETER(DescriptorBuffer);
-    UNREFERENCED_PARAMETER(DescriptorBufferSize);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiDestroyContext (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
-RokDdiSetPowerState(
-    _In_ PVOID                 MiniportDeviceContext,
-    _In_ ULONG                 DeviceUid,
-    _In_ DEVICE_POWER_STATE    DevicePowerState,
-    _In_ POWER_ACTION          ActionType
+RokDdiRender(
+    IN_CONST_HANDLE hContext,
+    INOUT_PDXGKARG_RENDER pRender
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(DeviceUid);
-    UNREFERENCED_PARAMETER(ActionType);
     PAGED_CODE();
-    // 先接受任何电源状态请求（不做硬件操作，避免骨架阶段状态机出错）。
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
-               "rokmd: SetPowerState state=%d\n", DevicePowerState));
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS
-RokDdiNotifyAcpiEvent(
-    _In_    VOID                     *MiniportDeviceContext,
-    _In_    ULONG                    DeviceUid,
-    _In_    DXGK_ACPI_EVENT_TYPE     EventType,
-    _Inout_ PACPI_NOTIFICATION_DATA  NotificationData,
-    _Out_   BOOLEAN                  *ReturnStatus
-    )
-{
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(DeviceUid);
-    UNREFERENCED_PARAMETER(EventType);
-    UNREFERENCED_PARAMETER(NotificationData);
-    PAGED_CODE();
-    if (ReturnStatus) { *ReturnStatus = FALSE; }
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiRender (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
-RokDdiQueryInterface(
-    _In_ PVOID             MiniportDeviceContext,
-    _In_ PQUERY_INTERFACE  QueryInterface
+RokDdiPresent(
+    IN_CONST_HANDLE hContext,
+    INOUT_PDXGKARG_PRESENT pPresent
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(QueryInterface);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiPresent (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
-
-NTSTATUS
-RokDdiGetChildContainerId(
-    _In_    CONST PVOID       MiniportDeviceContext,
-    _In_    ULONG             ChildUid,
-    _Inout_ PCONTAINER_ID     ContainerId
-    )
-{
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(ChildUid);
-    UNREFERENCED_PARAMETER(ContainerId);
-    PAGED_CODE();
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-NTSTATUS
-RokDdiDispatchIoRequest(
-    _In_  CONST PVOID            MiniportDeviceContext,
-    _In_  ULONG                  VidPnSourceId,
-    _In_  PVIDEO_REQUEST_PACKET  VideoRequestPacket
-    )
-{
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(VidPnSourceId);
-    UNREFERENCED_PARAMETER(VideoRequestPacket);
-    PAGED_CODE();
-    VideoRequestPacket->StatusBlock.Status = STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-// ---------------- VidPn（render-only 阶段不会被调用） ----------------
 
 NTSTATUS
 RokDdiIsSupportedVidPn(
-    _In_    CONST VOID                 *MiniportDeviceContext,
-    _Inout_ DXGKARG_ISSUPPORTEDVIDPN   *pIsSupportedVidPn
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_ISSUPPORTEDVIDPN pIsSupportedVidPn
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(pIsSupportedVidPn);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiIsSupportedVidPn (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiRecommendFunctionalVidPn(
-    _In_ CONST PVOID                              MiniportDeviceContext,
-    _In_ CONST DXGKARG_RECOMMENDFUNCTIONALVIDPN*  pRecommendFunctionalVidPn
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_RECOMMENDFUNCTIONALVIDPN_CONST pRecommendFunctionalVidPn
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(pRecommendFunctionalVidPn);
     PAGED_CODE();
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-NTSTATUS
-RokDdiRecommendMonitorModes(
-    _In_ CONST PVOID                            MiniportDeviceContext,
-    _In_ CONST DXGKARG_RECOMMENDMONITORMODES*   pRecommendMonitorModes
-    )
-{
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(pRecommendMonitorModes);
-    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiRecommendFunctionalVidPn (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiCommitVidPn(
-    _In_ CONST PVOID                    MiniportDeviceContext,
-    _In_ CONST DXGKARG_COMMITVIDPN*     pCommitVidPn
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_COMMITVIDPN_CONST pCommitVidPn
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(pCommitVidPn);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiCommitVidPn (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiUpdateActiveVidPnPresentPath(
-    _In_    CONST VOID                                       *MiniportDeviceContext,
-    _Inout_ CONST DXGKARG_UPDATEACTIVEVIDPNPRESENTPATH*      pUpdateActiveVidPnPresentPath
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_UPDATEACTIVEVIDPNPRESENTPATH_CONST pUpdateActiveVidPnPresentPath
     )
 {
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(pUpdateActiveVidPnPresentPath);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiUpdateActiveVidPnPresentPath (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiRecommendMonitorModes(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_RECOMMENDMONITORMODES_CONST pRecommendMonitorModes
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiRecommendMonitorModes (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiSetVidPnSourceAddress(
-    _In_ CONST HANDLE                          hAdapter,
-    _In_ CONST DXGKARG_SETVIDPNSOURCEADDRESS*  pSetVidPnSourceAddress
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESS pSetVidPnSourceAddress
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pSetVidPnSourceAddress);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiSetVidPnSourceAddress (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
-VOID
+NTSTATUS
 RokDdiSetVidPnSourceVisibility(
-    _In_ CONST HANDLE                              hAdapter,
-    _In_ CONST DXGKARG_SETVIDPNSOURCEVISIBILITY*   pSetVidPnSourceVisibility
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDPNSOURCEVISIBILITY pSetVidPnSourceVisibility
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(pSetVidPnSourceVisibility);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiSetVidPnSourceVisibility (stub)\n"));
+    return STATUS_NOT_IMPLEMENTED;
 }
-
-// ---------------- 中断 ----------------
-
-BOOLEAN
-RokDdiInterruptRoutine(
-    _In_ CONST PVOID MiniportDeviceContext,
-    _In_ ULONG       MessageNumber
-    )
-{
-    // 未启用硬件中断前不会进入；M3 接 IH ring 后改为 TRUE + DPC 排队。
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-    UNREFERENCED_PARAMETER(MessageNumber);
-    return FALSE;
-}
-
-VOID
-RokDdiDpcRoutine(
-    _In_ CONST PVOID MiniportDeviceContext
-    )
-{
-    UNREFERENCED_PARAMETER(MiniportDeviceContext);
-}
-
-// ---------------- WDDM 1.3（WIN8）引擎管理 ----------------
 
 NTSTATUS
 RokDdiControlInterrupt(
-    _In_ CONST HANDLE                 hAdapter,
-    _In_ CONST DXGK_INTERRUPT_TYPE    InterruptType,
-    _In_ BOOLEAN                      Enable
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_DXGK_INTERRUPT_TYPE InterruptType,
+    IN_BOOLEAN EnableInterrupt
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(InterruptType);
     PAGED_CODE();
-    // 拒绝启用：骨架未接 IH，OS 会按"中断不可用"处理。
-    UNREFERENCED_PARAMETER(Enable);
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiControlInterrupt (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiQueryDependentEngineGroup(
-    _In_  CONST HANDLE  hAdapter,
-    _Out_ UINT          *pNodeOrdinal,
-    _Out_ UINT          *pEngineOrdinal
+    IN_CONST_HANDLE hAdapter,
+    INOUT_DXGKARG_QUERYDEPENDENTENGINEGROUP pQueryDependentEngineGroup
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
     *pNodeOrdinal = 0;
     *pEngineOrdinal = 0;
     return STATUS_SUCCESS;
@@ -540,14 +468,12 @@ RokDdiQueryDependentEngineGroup(
 
 NTSTATUS
 RokDdiQueryEngineStatus(
-    _In_  CONST HANDLE          hAdapter,
-    _In_  UINT                  NodeOrdinal,
-    _In_  UINT                  EngineOrdinal,
-    _Out_ DXGK_ENGINE_STATUS    *pEngineStatus
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_QUERYENGINESTATUS pQueryEngineStatus
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
     PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
     pEngineStatus->ChangeFlags = DXGK_ENGINE_STATUS_CHANGE_TYPE_TRANSITION;
     pEngineStatus->Order = NodeOrdinal;
     pEngineStatus->Ordinal = EngineOrdinal;
@@ -556,53 +482,25 @@ RokDdiQueryEngineStatus(
 
 NTSTATUS
 RokDdiResetEngine(
-    _In_ CONST HANDLE  hAdapter,
-    _In_ UINT          NodeOrdinal,
-    _In_ UINT          EngineOrdinal
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_RESETENGINE pResetEngine
     )
 {
-    UNREFERENCED_PARAMETER(hAdapter);
-    UNREFERENCED_PARAMETER(NodeOrdinal);
-    UNREFERENCED_PARAMETER(EngineOrdinal);
     PAGED_CODE();
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-// ---------------- WDDM 2.0（WIN10）驻留 / 虚拟提交 ----------------
-
-NTSTATUS
-RokDdiMakeResident(
-    _In_ HANDLE                  hAdapter,
-    _Inout_ DXGKARG_MAKERESIDENT* pMakeResident
-    )
-{
-    UNREFERENCED_PARAMETER(hAdapter);
-    PAGED_CODE();
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "rokmd: MakeResident (stub!)\n"));
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-NTSTATUS
-RokDdiEvict(
-    _In_ CONST HANDLE           hAdapter,
-    _Inout_ DXGKARG_EVICT*      pEvict
-    )
-{
-    UNREFERENCED_PARAMETER(hAdapter);
-    PAGED_CODE();
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: Evict (stub)\n"));
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiResetEngine (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS
 RokDdiSubmitCommandVirtual(
-    _In_ CONST HANDLE                          hContext,
-    _In_ CONST DXGKARG_SUBMITCOMMANDVIRTUAL*   pSubmitCommandVirtual
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SUBMITCOMMANDVIRTUAL pSubmitCommand
     )
 {
-    UNREFERENCED_PARAMETER(hContext);
-    UNREFERENCED_PARAMETER(pSubmitCommandVirtual);
     PAGED_CODE();
-    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "rokmd: SubmitCommandVirtual (stub!)\n"));
+    UNREFERENCED_PARAMETER(0);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "rokmd: RokDdiSubmitCommandVirtual (stub)\n"));
     return STATUS_NOT_IMPLEMENTED;
 }
+

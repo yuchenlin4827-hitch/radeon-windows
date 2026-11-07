@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // 适配器生命周期实现：AddDevice / StartDevice / StopDevice / RemoveDevice 等。
+// 签名来自 scripts/gen_ddi2.py 生成的 adapter.h（与 WDK 26100 一致）。
 #include "precomp.h"
 #include "adapter.h"
 
@@ -32,19 +33,21 @@ RokDdiAddDevice(
 
 NTSTATUS
 RokDdiStartDevice(
-    _In_  CONST PVOID      MiniportDeviceContext,
-    _In_  PDXGK_START_INFO DxgkStartInfo,
-    _In_  PDXGK_DEVICE_INFO DxgkDeviceInfo,
-    _Out_ PULONG           NumberOfVideoPresentSources,
-    _Out_ PULONG           NumberOfChildren
+    IN_CONST_PVOID          MiniportDeviceContext,
+    IN_PDXGK_START_INFO     DxgkStartInfo,
+    IN_PDXGKRNL_INTERFACE   DxgkInterface,
+    OUT_PULONG              NumberOfVideoPresentSources,
+    OUT_PULONG              NumberOfChildren
     )
 {
     PROK_ADAPTER adapter = (PROK_ADAPTER)MiniportDeviceContext;
+    DXGK_DEVICE_INFO deviceInfo;
+    NTSTATUS status;
 
     UNREFERENCED_PARAMETER(DxgkStartInfo);
     PAGED_CODE();
 
-    if (adapter == NULL || DxgkDeviceInfo == NULL)
+    if (adapter == NULL || DxgkInterface == NULL)
     {
         return STATUS_INVALID_PARAMETER;
     }
@@ -54,12 +57,31 @@ RokDdiStartDevice(
     *NumberOfVideoPresentSources = 0;
     *NumberOfChildren = 0;
 
-    // 记录 OS 翻译后的硬件资源（MMIO BAR / IO 端口 / IRQ）。
+    adapter->PhysicalDeviceObject = NULL;
+    adapter->Started = FALSE;
+
+    // 通过 dxgkrnl 回调取设备信息（PDO + 翻译后的资源清单）。
     // TeraScale 期望形态（对照 Linux radeon 探测结果）：
     //   BAR0: MMIO 寄存器窗口（64KB~16MB 视代际）
     //   BAR2: VRAM aperture（可写映射显存）
     //   IRQ:  一条 MSI/Line-based 中断（IH ring）
-    RokLogTranslatedResources(DxgkDeviceInfo->TranslatedResourceList);
+    RtlZeroMemory(&deviceInfo, sizeof(deviceInfo));
+    status = DxgkInterface->DxgkCbGetDeviceInformation(DxgkInterface->DeviceHandle,
+                                                       &deviceInfo);
+    if (NT_SUCCESS(status))
+    {
+        adapter->PhysicalDeviceObject = deviceInfo.PhysicalDeviceObject;
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: StartDevice PDO %p, registry %wZ\n",
+                   deviceInfo.PhysicalDeviceObject,
+                   &deviceInfo.DeviceRegistryPath));
+        RokLogTranslatedResources(deviceInfo.TranslatedResourceList);
+    }
+    else
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+                   "rokmd: DxgkCbGetDeviceInformation failed 0x%08X\n", status));
+    }
 
     adapter->Started = TRUE;
 
@@ -70,7 +92,7 @@ RokDdiStartDevice(
 
 NTSTATUS
 RokDdiStopDevice(
-    _In_ CONST PVOID MiniportDeviceContext
+    IN_CONST_PVOID MiniportDeviceContext
     )
 {
     PROK_ADAPTER adapter = (PROK_ADAPTER)MiniportDeviceContext;
@@ -84,7 +106,7 @@ RokDdiStopDevice(
 
 NTSTATUS
 RokDdiRemoveDevice(
-    _In_ CONST PVOID MiniportDeviceContext
+    IN_CONST_PVOID MiniportDeviceContext
     )
 {
     PROK_ADAPTER adapter = (PROK_ADAPTER)MiniportDeviceContext;
@@ -101,7 +123,7 @@ RokDdiRemoveDevice(
 
 VOID
 RokDdiResetDevice(
-    _In_ PVOID MiniportDeviceContext
+    IN_PVOID MiniportDeviceContext
     )
 {
     UNREFERENCED_PARAMETER(MiniportDeviceContext);
@@ -167,4 +189,24 @@ RokLogTranslatedResources(
             }
         }
     }
+}
+
+BOOLEAN
+RokDdiInterruptRoutine(
+    IN_CONST_PVOID MiniportDeviceContext,
+    IN_ULONG       MessageNumber
+    )
+{
+    // 未启用硬件中断前不会进入；M3 接 IH ring 后改为 TRUE + DPC 排队。
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
+    UNREFERENCED_PARAMETER(MessageNumber);
+    return FALSE;
+}
+
+VOID
+RokDdiDpcRoutine(
+    IN_CONST_PVOID MiniportDeviceContext
+    )
+{
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
 }
