@@ -20,7 +20,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup MSBuild
+        # WDK 驱动工具链（WindowsApplicationForDrivers10.0）当前要求 VS2022 的
+        # MSBuild；VS18 (2026) 下 Microsoft.Cpp.Redirect props 解析失败，
+        # 因此显式锁定 17.x。
         uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
