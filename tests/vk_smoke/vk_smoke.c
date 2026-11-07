@@ -40,6 +40,7 @@ typedef uint64_t RokVkDeviceSize;
 #define ROK_VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO          1u
 #define ROK_VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO      2u
 #define ROK_VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO            3u
+#define ROK_VK_STRUCTURE_TYPE_SUBMIT_INFO                   4u
 #define ROK_VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO          5u
 #define ROK_VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO            12u
 #define ROK_VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO     16u
@@ -319,6 +320,7 @@ ROK_PFN(vkGetBufferMemoryRequirements)(RokVkHandle, RokVkHandle, RokVkMemoryRequ
 ROK_PFN(vkAllocateMemory)(RokVkHandle, const RokVkMemoryAllocateInfo*, const void*, RokVkHandle*);
 ROK_PFN(vkBindBufferMemory)(RokVkHandle, RokVkHandle, RokVkHandle, RokVkDeviceSize);
 ROK_PFN(vkMapMemory)(RokVkHandle, RokVkHandle, RokVkDeviceSize, RokVkDeviceSize, uint32_t, void**);
+ROK_PFN(vkUnmapMemory)(RokVkHandle, RokVkHandle);
 ROK_PFN(vkCreateDescriptorSetLayout)(RokVkHandle, const RokVkDescriptorSetLayoutCreateInfo*, const void*, RokVkHandle*);
 ROK_PFN(vkCreateDescriptorPool)(RokVkHandle, const RokVkDescriptorPoolCreateInfo*, const void*, RokVkHandle*);
 ROK_PFN(vkAllocateDescriptorSets)(RokVkHandle, const RokVkDescriptorSetAllocateInfo*, RokVkHandle*);

@@ -21,7 +21,7 @@ else
 fi
 # -I：引入共享契约头 rok_escape.h（KMD/ICD/gpu_probe 同源 ABI）
 "${CC}" -O2 -Wall -Wextra -Wno-unused-parameter \
-    -I../../kmd/src \
+    -I../../kmd/src -DROK_PROBE_HAS_ESCAPE_ABI=1 \
     -o gpu_probe.exe gpu_probe.c -lsetupapi ${EXTRA_LIBS}
 
 echo "[gpu_probe] built: $(ls -l gpu_probe.exe | awk '{print $5}') bytes"

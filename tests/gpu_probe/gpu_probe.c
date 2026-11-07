@@ -518,6 +518,8 @@ static void RokProbeVulkanIcdRegistry(void)
 // ---------------------------------------------------------------------------
 #if ROK_PROBE_HAS_ESCAPE_ABI
 
+#include "rok_escape.h"    /* 共享契约头（KMD/ICD/gpu_probe 同源 ABI） */
+
 typedef union _ROK_ESC_OUT_BUF {
     ROK_ESC_VERSION_OUT       version;
     ROK_ESC_PCI_ID_OUT        pci;
@@ -526,7 +528,7 @@ typedef union _ROK_ESC_OUT_BUF {
     ROK_ESC_SEGMENT_INFO_OUT  seg;
     ROK_ESC_SIM_STATUS_OUT    sim;
     ROK_ESC_CCC_SETTINGS      ccc;
-    unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 292];  // 最大 = SIM_STATUS(292)
+    unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 296];  // 最大 = SIM_STATUS(296)
 } ROK_ESC_OUT_BUF;
 
 static const char *RokEscFamilyName(unsigned int family)

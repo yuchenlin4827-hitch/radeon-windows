@@ -144,21 +144,21 @@ RokCccImport(
     // 时钟合法范围钳制（导入路径与 escape 路径同一规则）。
     if (s->ValidMask & ROK_CCC_VALID_ENGINE_CLOCK)
     {
-        s->EngineClockKHz = ROK_CCC_CLAMP(s->EngineClockKHz,
-                                          ROK_CCC_ENGINE_CLOCK_MIN_KHZ,
-                                          ROK_CCC_ENGINE_CLOCK_MAX_KHZ);
+        s->EngineClockKHz = RokCccClampUlong(s->EngineClockKHz,
+                                             ROK_CCC_ENGINE_CLOCK_MIN_KHZ,
+                                             ROK_CCC_ENGINE_CLOCK_MAX_KHZ);
     }
     if (s->ValidMask & ROK_CCC_VALID_MEMORY_CLOCK)
     {
-        s->MemoryClockKHz = ROK_CCC_CLAMP(s->MemoryClockKHz,
-                                          ROK_CCC_MEMORY_CLOCK_MIN_KHZ,
-                                          ROK_CCC_MEMORY_CLOCK_MAX_KHZ);
+        s->MemoryClockKHz = RokCccClampUlong(s->MemoryClockKHz,
+                                             ROK_CCC_MEMORY_CLOCK_MIN_KHZ,
+                                             ROK_CCC_MEMORY_CLOCK_MAX_KHZ);
     }
     if (s->ValidMask & ROK_CCC_VALID_FAN_SPEED)
     {
-        s->FanSpeedPercent = ROK_CCC_CLAMP(s->FanSpeedPercent,
-                                           ROK_CCC_FAN_MIN_PERCENT,
-                                           ROK_CCC_FAN_MAX_PERCENT);
+        s->FanSpeedPercent = RokCccClampUlong(s->FanSpeedPercent,
+                                              ROK_CCC_FAN_MIN_PERCENT,
+                                              ROK_CCC_FAN_MAX_PERCENT);
     }
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
@@ -217,15 +217,15 @@ RokCccSetSettings(
 
     if (In->ValidMask & ROK_CCC_VALID_ENGINE_CLOCK)
     {
-        s->EngineClockKHz = ROK_CCC_CLAMP(In->EngineClockKHz,
-                                          ROK_CCC_ENGINE_CLOCK_MIN_KHZ,
-                                          ROK_CCC_ENGINE_CLOCK_MAX_KHZ);
+        s->EngineClockKHz = RokCccClampUlong(In->EngineClockKHz,
+                                             ROK_CCC_ENGINE_CLOCK_MIN_KHZ,
+                                             ROK_CCC_ENGINE_CLOCK_MAX_KHZ);
     }
     if (In->ValidMask & ROK_CCC_VALID_MEMORY_CLOCK)
     {
-        s->MemoryClockKHz = ROK_CCC_CLAMP(In->MemoryClockKHz,
-                                          ROK_CCC_MEMORY_CLOCK_MIN_KHZ,
-                                          ROK_CCC_MEMORY_CLOCK_MAX_KHZ);
+        s->MemoryClockKHz = RokCccClampUlong(In->MemoryClockKHz,
+                                             ROK_CCC_MEMORY_CLOCK_MIN_KHZ,
+                                             ROK_CCC_MEMORY_CLOCK_MAX_KHZ);
     }
     if (In->ValidMask & ROK_CCC_VALID_OD_ENABLE)
     {
@@ -233,9 +233,9 @@ RokCccSetSettings(
     }
     if (In->ValidMask & ROK_CCC_VALID_FAN_SPEED)
     {
-        s->FanSpeedPercent = ROK_CCC_CLAMP(In->FanSpeedPercent,
-                                           ROK_CCC_FAN_MIN_PERCENT,
-                                           ROK_CCC_FAN_MAX_PERCENT);
+        s->FanSpeedPercent = RokCccClampUlong(In->FanSpeedPercent,
+                                              ROK_CCC_FAN_MIN_PERCENT,
+                                              ROK_CCC_FAN_MAX_PERCENT);
     }
     s->ValidMask |= In->ValidMask;
     s->Source = ROK_CCC_SOURCE_ESCAPE;

@@ -40,8 +40,22 @@ struct _ROK_ADAPTER;
 #define ROK_CCC_FAN_MIN_PERCENT         0UL
 #define ROK_CCC_FAN_MAX_PERCENT         100UL
 
-// 钳制宏（内核头 min/max 可用性随 WDK 版本不同，自备）。
-#define ROK_CCC_CLAMP(v, lo, hi)    (((v) < (lo)) ? (lo) : (((v) > (hi)) ? (hi) : (v)))
+// 钳制辅助（内联函数而非宏：无符号对常量 0 的比较在 WDK /sdl 下会触发
+// C4296 升级为错误；函数参数形式编译器无法判定恒假）。
+__inline
+ULONG
+RokCccClampUlong(_In_ ULONG Value, _In_ ULONG MinValue, _In_ ULONG MaxValue)
+{
+    if (Value > MaxValue)
+    {
+        return MaxValue;
+    }
+    if (Value < MinValue)
+    {
+        return MinValue;
+    }
+    return Value;
+}
 
 // CCC 设置块（escape 报文体；也是适配器内的当前设置存储）。
 typedef struct _ROK_CCC_SETTINGS
