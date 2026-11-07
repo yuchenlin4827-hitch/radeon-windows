@@ -56,21 +56,32 @@ radeon-windows/
 │   ├── roadmap.md             # M0–M6 分阶段计划
 │   ├── api-matrix.md          # API × GPU 代际 兼容矩阵（含来源）
 │   ├── wddm-vulkan-limits.md  # WDDM / Vulkan 版本上限调研
+│   ├── simulated-device.md    # 模拟设备 VM 运行手册（QEMU ati-vga 等）
+│   ├── ccc.md                 # 官方 CCC 设置兼容（值名映射 / ADL shim）
 │   ├── research/terakan.md    # terakan 调研笔记
 │   └── licensing.md           # MIT / GPL-2.0 许可证分析
-├── kmd/                       # 自研 WDDM 2.0 显示微型端口（KMD）骨架
+├── kmd/                       # 自研 WDDM 2.0 显示微型端口（KMD）
 │   ├── rokmd.vcxproj          #   VS2022 + WDK NuGet 工程
-│   ├── rokmd.inf              #   安装 INF（TeraScale 全家族 306 设备）
-│   └── src/                   #   DriverEntry + DXGK DDI 骨架
+│   ├── rokmd.inf              #   安装 INF（TeraScale 306 设备 + 模拟设备段）
+│   └── src/                   #   DriverEntry + DXGK DDI
+│       ├── sim.c              #   模拟设备后端（VM 里跑通管线，PM4 解码前哨）
+│       └── ccc.c              #   CCC 设置兼容层（注册表导入 + escape get/set）
 ├── umd/
-│   └── README.md              # 用户态驱动（terakan 集成）计划
-├── tests/gpu_probe/
-│   ├── gpu_probe.c            # PCI / WDDM / Vulkan 三段探测工具
-│   ├── build-mingw.sh         # Linux 下交叉编译脚本
-│   └── gpu_probe.exe          # 预编译 x64 版
+│   ├── README.md              # 用户态驱动（terakan 集成）计划 + KMD⇄ICD 契约
+│   ├── icd/                   # terakan ICD manifest
+│   ├── install-terakan.ps1    # ICD 安装脚本（loader 注册表机制）
+│   └── adl/                   # ADL 兼容 shim（rok_adl.dll，CCC 生态桥梁）
+├── tests/
+│   ├── gpu_probe/             # 探测工具（PCI / WDDM / hypervisor / Vulkan / escape）
+│   ├── vk_smoke/              # Vulkan compute 端到端冒烟
+│   └── adl_smoke/             # ADL shim 链接冒烟
+├── scripts/
+│   └── gen_spirv.py           # vk_smoke 依赖的 SPIR-V 生成器
 ├── .github/workflows/
 │   ├── build-kmd.yml          # Windows Runner + WDK NuGet 自动编译 .sys
-│   └── build-gpu-probe.yml    # gpu_probe 双端构建
+│   ├── build-gpu-probe.yml    # gpu_probe 双端构建
+│   ├── build-vk-smoke.yml     # vk_smoke 双端构建
+│   └── build-adl.yml          # rok_adl.dll 双工具链构建
 ├── packages.config            # WDK NuGet 包清单
 └── Directory.Build.props      # MSBuild 导入 + WDK NuGet 路径修正
 ```
@@ -109,14 +120,15 @@ msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 | 阶段 | 目标 | 状态 |
 | --- | --- | --- |
 | M0 | 仓库 / CI / 探测工具 / 文档 | ✅（CI 绿灯，rokmd.sys 产出） |
-| M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 |
-| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 M2.6：CI 绿灯产出 .sys，0x5023 DDI 表无 NULL 成员 + Escape v1 可用，待实机加载验证 |
-| M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先） |
-| M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜ |
+| M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 ICD 安装管线与 vk_smoke 就位，terakan 本体待 CI 编译 |
+| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 CI 绿灯产出 .sys；**M2.5** 真实最小实现、**M2.6** 0x5023 DDI 表补全 + Escape v1 双模式、**M2.7** 模拟设备 + CCC 设置兼容落地；待实机/VM 加载验证 |
+| M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先；sim.c 的 PM4 解码器已就位） |
+| M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜（escape 契约头已交付） |
 | M5 | Zink（GL）可行性验证：Vulkan 1.1 → GL 4.5 | ⬜ |
 | M6 | DX12 层评估（受 Vulkan 1.3 前置约束） | ⬜ |
 
-完整定义见 [docs/roadmap.md](docs/roadmap.md)。
+完整定义见 [docs/roadmap.md](docs/roadmap.md)；下一批可支持目标的评估见
+[docs/api-matrix.md](docs/api-matrix.md) 第 5 节。
 
 ## 许可证
 

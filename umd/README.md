@@ -28,7 +28,9 @@ KMD 通过 `DxgkDdiEscape` 提供**版本化私有查询通道**，契约头
 | `ROK_ESC_TYPE_QUERY_VERSION` | `ROK_ESC_VERSION_OUT` | 驱动版本 + WDDM DDI 版本 |
 | `ROK_ESC_TYPE_QUERY_PCI_ID` | `ROK_ESC_PCI_ID_OUT` | VID/DID/REV + TeraScale 家族（1/2/3） |
 | `ROK_ESC_TYPE_QUERY_VRAM` | `ROK_ESC_VRAM_OUT` | 显存/GTT 尺寸（M3 前为 0） |
-| `ROK_ESC_TYPE_QUERY_CAPS` | `ROK_ESC_CAPS_OUT` | 能力位（MMIO/PM4/IH/VRAM 段就绪标记） |
+| `ROK_ESC_TYPE_QUERY_CAPS` | `ROK_ESC_CAPS_OUT` | 能力位（MMIO/PM4/IH/VRAM/SIM 就绪标记） |
+| `ROK_ESC_TYPE_QUERY_SIM_STATUS` | `ROK_ESC_SIM_STATUS_OUT` | 模拟设备状态 + PM4 解码统计（M2.6） |
+| `ROK_ESC_TYPE_CCC_GET/SET_SETTINGS` | `ROK_ESC_CCC_SETTINGS` | CCC 设置兼容读/写（M2.6，见 docs/ccc.md） |
 
 报文格式：缓冲区 = `[ROK_ESCAPE_HEADER][OUT]`（16 字节头 + 输出体），
 magic = `0x4B4F5241`，version = 1。IUserModeDriver 经
@@ -53,6 +55,9 @@ M4 时 ICD 的命令流（PM4 INDIRECT_BUFFER）经 `SubmitCommandVirtual`
 ## 当前状态
 
 - ICD JSON 模板 + 安装脚本已就位（本目录）。
+- **ADL 兼容 shim（adl/）已就位**：官方 CCC 生态的设置习惯桥接到 rokmd
+  （ADL2 同名枚举面 + Overdrive 设置桥），详见
+  [adl/README.md](adl/README.md) 与 [../docs/ccc.md](../docs/ccc.md)。
 - M1 启动前 terakan 本体仍需从 Triang3l/mesa 构建（CI 管线待建）。
 
 ### 为什么用户态先行

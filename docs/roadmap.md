@@ -1,9 +1,12 @@
 # 分阶段路线图（M0–M6）
 
 > 状态标记：⬜ 未开始 ｜ 🚧 进行中 ｜ ✅ 完成
-> 当前状态：**M0 完成；M2.5/M2.6 完成编译与 WDDM 2.0 DDI 表补全（2026-11）**
-> ——CI 在 windows-2022 上自动产出 rokmd.sys（WDK NuGet + VS2022），
-> 0x5023 范围内 DDI 表无 NULL 成员，Escape v1 查询面可用；待实机加载验证。
+> 当前状态：**M0 完成；M2.5–M2.7 完成 DDI 补全 + 模拟设备 + CCC 兼容（2026-11）**
+> ——CI 在 windows-2022 上自动产出 rokmd.sys（WDK NuGet + VS2022）；
+> M2.5 真实最小实现、M2.6 0x5023 DDI 表补全 + Escape v1 双模式
+>（KMD/ICD/gpu_probe 同源 ABI）；M2.7 新增**模拟设备**（无硬件 VM 里跑通
+> 管线）与**CCC 设置兼容**（注册表导入 + escape + ADL shim）。
+> 待实机/VM 加载验证。
 
 每个阶段都有明确的"验收门"（DoD），未过验收不进入下一阶段。
 
@@ -45,21 +48,29 @@
 
 - ✅ `DriverEntry` + `DxgkInitialize` DDI 注册
 - ✅ `AddDevice`（PDO 绑定 + 上下文分配）、`StartDevice`（BAR/IRQ 资源枚举 + 日志）
+- ✅ `DriverEntry` + `DxgkInitialize` DDI 注册
+- ✅ `AddDevice`（PDO 绑定 + 上下文分配）、`StartDevice`（BAR/IRQ 资源枚举 + 日志）
 - ✅ M2.5：QueryAdapterInfo（DRIVERCAPS/SEGMENT/GPUMMUCAPS）、分配/上下文/
   进程簿记、即时完成提交模型、BuildPagingBuffer NOP、Escape v1
 - ✅ M2.6：WDK 26100 结构用法修复（StatusBlock/OpenAllocation）+
   **0x5023 DDI 表补全**（RestartFromTimeout/GetNodeMetadata/SystemDisplay
   系列/遗留显示面/PowerRuntime 等，共 24 个新成员；显示/GDI 路径保持
-  NOT_IMPLEMENTED）+ DRIVERCAPS.SupportSurpriseRemoval
-- ✅ Escape 契约双模式化（`kmd/src/rok_escape.h`：KMD/ICD/gpu_probe 同源
+  NOT_IMPLEMENTED）+ DRIVERCAPS.SupportSurpriseRemoval；
+  Escape 契约双模式化（`kmd/src/rok_escape.h`：KMD/ICD/gpu_probe 同源
   ABI）+ QUERY_SEGMENT_INFO + gpu_probe [4] escape 通道实测段
-- ⬜ 修复首轮 CI / 实机安装暴露的签名与 INF 问题
+- ✅ M2.7a：**模拟设备**（kmd/src/sim.c）—— 设备 ID/注册表/hypervisor 三路
+  判定、64KB 模拟寄存器空间、提交路径 PM4 解码（opcode 直方图）、
+  escape `QUERY_SIM_STATUS`；INF 模拟设备段（QEMU ati-vga 等 5 个 ID）
+- ✅ M2.7b：**CCC 设置兼容**（kmd/src/ccc.c + umd/adl/rok_adl.dll）——
+  Catalyst 遗留值名 + rokmd 专有名导入、escape CCC get/set、ADL2 同名
+  枚举面；详见 docs/ccc.md
+- ⬜ 修复首轮 CI / 实机 / VM 加载暴露的签名与 INF 问题
 - ⬜ 双机调试环境文档化（WinDbg + 1394/网络，或 Hyper-V Gen1 + 调试内核）
 
-**验收门**：实机 `pnputil /add-driver rokmd.inf /install` 后适配器以"代码 43
-（请求的资源未实现）"或"正常启动但无输出"状态稳定存在，**无 BSOD**；
-dbgview/Windbg 能看到 StartDevice 打印的 BAR 清单；gpu_probe [4] 段对
-rokmd 适配器回显版本/PCI/能力。
+**验收门**：实机或 VM（[docs/simulated-device.md](simulated-device.md) 的
+QEMU ati-vga 路径）`pnputil /add-driver rokmd.inf /install` 后适配器以
+"代码 43（请求的资源未实现）"或"正常启动但无输出"状态稳定存在，**无 BSOD**；
+gpu_probe [4] 段对 rokmd 适配器回显版本/PCI/能力/段/模拟状态/CCC。
 
 ## M3 —— KMD 基础硬件能力 ⬜
 
