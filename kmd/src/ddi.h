@@ -291,3 +291,226 @@ RokDdiNotifySurpriseRemoval(
     _In_ DXGK_SURPRISE_REMOVAL_TYPE RemovalType
     );
 
+
+// ---- M2.6 追加：WDDM 2.0 DDI 表补全（签名对照 WDK 26100 d3dkmddi.h/dispmprt.h）----
+
+NTSTATUS
+RokDdiAcquireSwizzlingRange(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_ACQUIRESWIZZLINGRANGE pAcquireSwizzlingRange
+    );
+
+NTSTATUS
+RokDdiReleaseSwizzlingRange(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_RELEASESWIZZLINGRANGE pReleaseSwizzlingRange
+    );
+
+NTSTATUS
+RokDdiSetPalette(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETPALETTE pSetPalette
+    );
+
+NTSTATUS
+RokDdiSetPointerPosition(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETPOINTERPOSITION pSetPointerPosition
+    );
+
+NTSTATUS
+RokDdiSetPointerShape(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETPOINTERSHAPE pSetPointerShape
+    );
+
+NTSTATUS
+RokDdiEnumVidPnCofuncModality(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
+    );
+
+NTSTATUS
+RokDdiRecommendVidPnTopology(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_RECOMMENDVIDPNTOPOLOGY_CONST pRecommendVidPnTopology
+    );
+
+NTSTATUS
+RokDdiGetScanLine(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_GETSCANLINE pGetScanLine
+    );
+
+NTSTATUS
+RokDdiStopCapture(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_STOPCAPTURE pStopCapture
+    );
+
+NTSTATUS
+RokDdiSetDisplayPrivateDriverFormat(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETDISPLAYPRIVATEDRIVERFORMAT pSetDisplayPrivateDriverFormat
+    );
+
+NTSTATUS
+RokDdiCreateOverlay(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_CREATEOVERLAY pCreateOverlay
+    );
+
+NTSTATUS
+RokDdiUpdateOverlay(
+    IN_CONST_HANDLE hOverlay,
+    IN_CONST_PDXGKARG_UPDATEOVERLAY pUpdateOverlay
+    );
+
+NTSTATUS
+RokDdiFlipOverlay(
+    IN_CONST_HANDLE hOverlay,
+    IN_CONST_PDXGKARG_FLIPOVERLAY pFlipOverlay
+    );
+
+NTSTATUS
+RokDdiDestroyOverlay(
+    IN_CONST_HANDLE hOverlay
+    );
+
+NTSTATUS
+RokDdiRenderKm(
+    IN_CONST_HANDLE hContext,
+    INOUT_PDXGKARG_RENDER pRenderKmArgs
+    );
+
+NTSTATUS
+RokDdiQueryVidPnHWCapability(
+    IN_CONST_HANDLE i_hAdapter,
+    INOUT_PDXGKARG_QUERYVIDPNHWCAPABILITY io_pVidPnHWCaps
+    );
+
+NTSTATUS
+RokDdiStopDeviceAndReleasePostDisplayOwnership(
+    _In_ PVOID MiniportDeviceContext,
+    _In_ D3DDDI_VIDEO_PRESENT_TARGET_ID TargetId,
+    _Out_ PDXGK_DISPLAY_INFORMATION DisplayInfo
+    );
+
+NTSTATUS
+RokDdiSystemDisplayEnable(
+    _In_ PVOID MiniportDeviceContext,
+    _In_ D3DDDI_VIDEO_PRESENT_TARGET_ID TargetId,
+    _In_ PDXGKARG_SYSTEM_DISPLAY_ENABLE_FLAGS Flags,
+    _Out_ UINT* Width,
+    _Out_ UINT* Height,
+    _Out_ D3DDDIFORMAT* ColorFormat
+    );
+
+VOID
+RokDdiSystemDisplayWrite(
+    _In_ PVOID MiniportDeviceContext,
+    _In_reads_bytes_(SourceHeight * SourceStride) PVOID Source,
+    _In_ UINT SourceWidth,
+    _In_ UINT SourceHeight,
+    _In_ UINT SourceStride,
+    _In_ UINT PositionX,
+    _In_ UINT PositionY
+    );
+
+NTSTATUS
+RokDdiRestartFromTimeout(
+    IN_CONST_HANDLE hAdapter
+    );
+
+NTSTATUS
+RokDdiGetNodeMetadata(
+    IN_CONST_HANDLE hAdapter,
+    UINT NodeOrdinalAndAdapterIndex,
+    OUT_PDXGKARG_GETNODEMETADATA pGetNodeMetadata
+    );
+
+NTSTATUS
+RokDdiControlInterrupt2(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_DXGKARG_CONTROLINTERRUPT2 InterruptControl
+    );
+
+NTSTATUS
+RokDdiCheckMultiPlaneOverlaySupport(
+    IN_CONST_HANDLE hAdapter,
+    IN_OUT_PDXGKARG_CHECKMULTIPLANEOVERLAYSUPPORT pCheckMultiPlaneOverlaySupport
+    );
+
+NTSTATUS
+RokDdiCalibrateGpuClock(
+    IN_CONST_HANDLE hAdapter,
+    UINT32 NodeOrdinal,
+    UINT32 EngineOrdinal,
+    OUT_PDXGKARG_CALIBRATEGPUCLOCK pClockCalibration
+    );
+
+NTSTATUS
+RokDdiFormatHistoryBuffer(
+    IN_CONST_HANDLE hContext,
+    DXGKARG_FORMATHISTORYBUFFER* pFormatData
+    );
+
+NTSTATUS
+RokDdiRenderGdi(
+    IN_CONST_HANDLE hContext,
+    INOUT_PDXGKARG_RENDERGDI pRenderGdi
+    );
+
+VOID
+RokDdiSetRootPageTable(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETROOTPAGETABLE pSetPageTable
+    );
+
+SIZE_T
+RokDdiGetRootPageTableSize(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_GETROOTPAGETABLESIZE pArgs
+    );
+
+NTSTATUS
+RokDdiMapCpuHostAperture(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_MAPCPUHOSTAPERTURE pArgs
+    );
+
+NTSTATUS
+RokDdiUnmapCpuHostAperture(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_UNMAPCPUHOSTAPERTURE pArgs
+    );
+
+NTSTATUS
+RokDdiCheckMultiPlaneOverlaySupport2(
+    IN_CONST_HANDLE hAdapter,
+    IN_OUT_PDXGKARG_CHECKMULTIPLANEOVERLAYSUPPORT2 pCheckMultiPlaneOverlaySupport
+    );
+
+NTSTATUS
+RokDdiSetVidPnSourceAddressWithMultiPlaneOverlay2(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY2 pSetVidPnSourceAddressWithMultiPlaneOverlay
+    );
+
+NTSTATUS
+RokDdiPowerRuntimeSetDeviceHandle(
+    IN_CONST_HANDLE DriverContext,
+    HANDLE PoDeviceHandle
+    );
+
+VOID
+RokDdiSetStablePowerState(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETSTABLEPOWERSTATE pArgs
+    );
+
+NTSTATUS
+RokDdiSetVideoProtectedRegion(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDEOPROTECTEDREGION pArgs
+    );

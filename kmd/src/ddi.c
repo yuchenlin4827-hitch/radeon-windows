@@ -110,8 +110,12 @@ RokDdiDispatchIoRequest(
     UNREFERENCED_PARAMETER(VidPnSourceId);
 
     // 无显示路径：拒绝一切视频请求包。
-    VideoRequestPacket->StatusBlock.Status = STATUS_NOT_SUPPORTED;
-    VideoRequestPacket->StatusBlock.Information = 0;
+    // WDK 26100: VIDEO_REQUEST_PACKET.StatusBlock 为 PSTATUS_BLOCK（指针）。
+    if (VideoRequestPacket->StatusBlock != NULL)
+    {
+        VideoRequestPacket->StatusBlock->Status = STATUS_NOT_SUPPORTED;
+        VideoRequestPacket->StatusBlock->Information = 0;
+    }
     return STATUS_NOT_SUPPORTED;
 }
 
@@ -295,6 +299,10 @@ RokDdiQueryAdapterInfo(
 
         // PreemptionCaps 全零 = 不支持抢占粒度细分（OS 仍会在必要时
         // 调用 PreemptCommand，见 SchedulingCaps.PreemptionAware）。
+
+        // 惊喜移除已实现（NotifySurpriseRemoval 返回成功）：显式声明，
+        // 设备热拔时 OS 走标准通知链而非强杀路径。
+        caps->SupportSurpriseRemoval = TRUE;
 
         caps->WDDMVersion = DXGKDDI_WDDMv2;
 
@@ -537,26 +545,35 @@ RokDdiOpenAllocation(
         return STATUS_INVALID_PARAMETER;
     }
 
+    // WDK 26100: DXGKARG_OPENALLOCATION 携带 DXGK_OPENALLOCATIONINFO* 数组。
+    if (pOpenAllocation->pOpenAllocation == NULL)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
     for (i = 0; i < pOpenAllocation->NumAllocations; i++)
     {
         DXGKARGCB_GETHANDLEDATA query;
         VOID *data;
 
         RtlZeroMemory(&query, sizeof(query));
-        query.hObject = pOpenAllocation[i].hAllocation;
+        query.hObject = pOpenAllocation->pOpenAllocation[i].hAllocation;
         query.Type = DXGK_HANDLE_ALLOCATION;
-        query.Flags.DeviceSpecific = 1;
+        // DeviceSpecific = 0：取 CreateAllocation 登记的分配级私有数据
+        //（= info->hAllocation，即 ROK_ALLOCATION 记录指针）。
+        query.Flags.DeviceSpecific = 0;
 
         data = adapter->DxgkInterface.DxgkCbGetHandleData(&query);
         if (data == NULL)
         {
             KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
-                       "rokmd: OpenAllocation — bad allocation handle %p\n",
-                       (PVOID)(ULONG_PTR)pOpenAllocation[i].hAllocation));
+                       "rokmd: OpenAllocation — bad allocation handle 0x%p\n",
+                       (PVOID)(ULONG_PTR)pOpenAllocation->pOpenAllocation[i].hAllocation));
             return STATUS_INVALID_HANDLE;
         }
 
-        pOpenAllocation[i].hDeviceSpecificAllocation = data;
+        // 设备级打开句柄 = 同一记录指针；提交路径仅做簿记。
+        pOpenAllocation->pOpenAllocation[i].hDeviceSpecificAllocation = data;
     }
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
@@ -936,13 +953,21 @@ RokDdiEscape(
         return STATUS_INVALID_PARAMETER;
     }
 
+    // 适配器级支持：hDevice 可为 NULL（D3DKMTEscape 的 hDevice=0 调用形态，
+    // gpu_probe / 探针工具用）；此时退回适配器上下文。
     device = (PROK_DEVICE)pEscape->hDevice;
-    if (device == NULL || device->Adapter == NULL)
+    if (device != NULL && device->Adapter != NULL)
+    {
+        adapter = device->Adapter;
+    }
+    else
+    {
+        adapter = (PROK_ADAPTER)hAdapter;
+    }
+    if (adapter == NULL)
     {
         return STATUS_INVALID_HANDLE;
     }
-    adapter = device->Adapter;
-    UNREFERENCED_PARAMETER(hAdapter);
 
     header = (PROK_ESCAPE_HEADER)pEscape->pPrivateDriverData;
     if (header->Magic != ROK_ESCAPE_MAGIC)
@@ -1000,7 +1025,7 @@ RokDdiEscape(
             return STATUS_BUFFER_TOO_SMALL;
         }
         out = (PROK_ESC_VRAM_OUT)(header + 1);
-        // M3 前 0 段：显存/GTT 尺寸未知。
+        // M3 前 0 段：显存/GTT 尺寸未知。ICD 应改用 QUERY_SEGMENT_INFO。
         out->VramSizeBytes = 0;
         out->GartSizeBytes = 0;
         out->VramSegmentId = 0;
@@ -1017,7 +1042,7 @@ RokDdiEscape(
             return STATUS_BUFFER_TOO_SMALL;
         }
         out = (PROK_ESC_CAPS_OUT)(header + 1);
-        out->CapsMask = ROK_CAP_PCI_ID_VALID;
+        out->CapsMask = ROK_CAP_PCI_ID_VALID | ROK_CAP_SEGMENT_QUERY;
         if (adapter->MmioVirtualAddress != NULL)
         {
             out->CapsMask |= ROK_CAP_MMIO_MAPPED;
@@ -1025,6 +1050,26 @@ RokDdiEscape(
         out->Pm4PacketVersion = 3;   // TeraScale type-3 PM4
         out->Reserved[0] = 0;
         out->Reserved[1] = 0;
+        return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_QUERY_SEGMENT_INFO:
+    {
+        PROK_ESC_SEGMENT_INFO_OUT out;
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_SEGMENT_INFO_OUT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_SEGMENT_INFO_OUT)(header + 1);
+        // M3 前全 0：VRAM/GTT 段尚未建立；M3 探测后填充真实尺寸/段号并
+        // 置 ROK_SEG_FLAG_*_POPULATED（ICD 依此构造 VkMemoryHeap 布局）。
+        out->VramSizeBytes = 0;
+        out->GartSizeBytes = 0;
+        out->VramSegmentId = 0;
+        out->GartSegmentId = 0;
+        out->Flags = 0;
+        out->Reserved = 0;
         return STATUS_SUCCESS;
     }
 
@@ -1254,4 +1299,558 @@ RokDdiResetEngine(
     pResetEngine->LastAbortedFenceId =
         (adapter != NULL) ? (UINT)adapter->LastCompletedFenceId : 0;
     return STATUS_SUCCESS;
+}
+
+// ------------------------------------------------------------------
+// WDDM 2.0 DDI 表补全（M2.6）
+//
+// 目标：DRIVER_INITIALIZATION_DATA 在 DXGKDDI_INTERFACE_VERSION 0x5023
+// 范围内不再有 NULL 成员 —— dxgkrnl 对各版本必填成员做校验，缺项会在
+// 加载期被拒绝。分工：
+//   * 可达路径给最小正确行为（RestartFromTimeout / GetNodeMetadata /
+//     CheckMultiPlaneOverlaySupport* / QueryVidPnHWCapability / 电源类）；
+//   * 渲染专用形态不可达的路径（显示 / 覆盖 / 指针 / 调色板 / 交换带 /
+//     GDI 表面）返回 STATUS_NOT_IMPLEMENTED，保签名、留观测点。
+// IRQL 一律对照 d3dkmddi.h / dispmprt.h 的 _IRQL_ 注解（签名经
+// WDK 26100 头文件核对）。
+// ------------------------------------------------------------------
+
+// ---- TDR 恢复闭环 ----
+// ResetFromTimeout 返回成功后，OS 会调用本 DDI 继续调度。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiRestartFromTimeout(
+    IN_CONST_HANDLE hAdapter
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    // 即时完成模型无硬件状态可恢复；M3 在此重置 ring 写指针/ fence 状态。
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+               "rokmd: RestartFromTimeout\n"));
+    return STATUS_SUCCESS;
+}
+
+// ---- 交换带（swizzling range；NumberOfSwizzlingRanges=0，不会被调用）----
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiAcquireSwizzlingRange(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_ACQUIRESWIZZLINGRANGE pAcquireSwizzlingRange
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pAcquireSwizzlingRange);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiReleaseSwizzlingRange(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_RELEASESWIZZLINGRANGE pReleaseSwizzlingRange
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pReleaseSwizzlingRange);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// ---- 指针 / 调色板（PointerCaps 全零、无显示路径，不会被调用）----
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiSetPalette(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETPALETTE pSetPalette
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetPalette);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiSetPointerPosition(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETPOINTERPOSITION pSetPointerPosition
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetPointerPosition);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiSetPointerShape(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETPOINTERSHAPE pSetPointerShape
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetPointerShape);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// ---- VidPn 其余成员（0 路 source / 0 子设备，不会被调用）----
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiEnumVidPnCofuncModality(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pEnumCofuncModality);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiRecommendVidPnTopology(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_RECOMMENDVIDPNTOPOLOGY_CONST pRecommendVidPnTopology
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pRecommendVidPnTopology);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiGetScanLine(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_GETSCANLINE pGetScanLine
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pGetScanLine);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiStopCapture(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_STOPCAPTURE pStopCapture
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pStopCapture);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiSetDisplayPrivateDriverFormat(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETDISPLAYPRIVATEDRIVERFORMAT pSetDisplayPrivateDriverFormat
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetDisplayPrivateDriverFormat);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// ---- 覆盖（MaxOverlays=0，不会被调用）----
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiCreateOverlay(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_CREATEOVERLAY pCreateOverlay
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pCreateOverlay);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiUpdateOverlay(
+    IN_CONST_HANDLE hOverlay,
+    IN_CONST_PDXGKARG_UPDATEOVERLAY pUpdateOverlay
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hOverlay);
+    UNREFERENCED_PARAMETER(pUpdateOverlay);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiFlipOverlay(
+    IN_CONST_HANDLE hOverlay,
+    IN_CONST_PDXGKARG_FLIPOVERLAY pFlipOverlay
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hOverlay);
+    UNREFERENCED_PARAMETER(pFlipOverlay);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiDestroyOverlay(
+    IN_CONST_HANDLE hOverlay
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hOverlay);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// ---- Win7 追加成员 ----
+// 内核侧系统内存命令缓冲（DX9 时代遗留）：与 DxgkDdiRender 一致地拒绝。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiRenderKm(
+    IN_CONST_HANDLE hContext,
+    INOUT_PDXGKARG_RENDER pRenderKmArgs
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hContext);
+    UNREFERENCED_PARAMETER(pRenderKmArgs);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// VidPn 硬件能力探测：渲染专用形态，全部能力位为 0（不支持）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiQueryVidPnHWCapability(
+    IN_CONST_HANDLE i_hAdapter,
+    INOUT_PDXGKARG_QUERYVIDPNHWCAPABILITY io_pVidPnHWCaps
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(i_hAdapter);
+
+    if (io_pVidPnHWCaps != NULL)
+    {
+        RtlZeroMemory(io_pVidPnHWCaps, sizeof(*io_pVidPnHWCaps));
+    }
+    return STATUS_SUCCESS;
+}
+
+// ---- Win8 追加成员 ----
+// POST 设备所有权释放（bugcheck 显示路径）：本驱动从未持有 POST，
+// 按文档以 STATUS_NOT_SUPPORTED 拒绝。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiStopDeviceAndReleasePostDisplayOwnership(
+    _In_ PVOID MiniportDeviceContext,
+    _In_ D3DDDI_VIDEO_PRESENT_TARGET_ID TargetId,
+    _Out_ PDXGK_DISPLAY_INFORMATION DisplayInfo
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
+    UNREFERENCED_PARAMETER(TargetId);
+    UNREFERENCED_PARAMETER(DisplayInfo);
+    return STATUS_NOT_SUPPORTED;
+}
+
+// 系统显示（蓝屏文字渲染）：无显示路径，显式拒绝。
+// 无 IRQL 注解（可在 bugcheck 路径调用）：禁止 PAGED_CODE / 池分配。
+NTSTATUS
+RokDdiSystemDisplayEnable(
+    _In_ PVOID MiniportDeviceContext,
+    _In_ D3DDDI_VIDEO_PRESENT_TARGET_ID TargetId,
+    _In_ PDXGKARG_SYSTEM_DISPLAY_ENABLE_FLAGS Flags,
+    _Out_ UINT* Width,
+    _Out_ UINT* Height,
+    _Out_ D3DDDIFORMAT* ColorFormat
+    )
+{
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
+    UNREFERENCED_PARAMETER(TargetId);
+    UNREFERENCED_PARAMETER(Flags);
+    UNREFERENCED_PARAMETER(Width);
+    UNREFERENCED_PARAMETER(Height);
+    UNREFERENCED_PARAMETER(ColorFormat);
+    return STATUS_NOT_SUPPORTED;
+}
+
+VOID
+RokDdiSystemDisplayWrite(
+    _In_ PVOID MiniportDeviceContext,
+    _In_reads_bytes_(SourceHeight * SourceStride) PVOID Source,
+    _In_ UINT SourceWidth,
+    _In_ UINT SourceHeight,
+    _In_ UINT SourceStride,
+    _In_ UINT PositionX,
+    _In_ UINT PositionY
+    )
+{
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
+    UNREFERENCED_PARAMETER(Source);
+    UNREFERENCED_PARAMETER(SourceWidth);
+    UNREFERENCED_PARAMETER(SourceHeight);
+    UNREFERENCED_PARAMETER(SourceStride);
+    UNREFERENCED_PARAMETER(PositionX);
+    UNREFERENCED_PARAMETER(PositionY);
+}
+
+// ---- WDDM 1.3 追加成员 ----
+// 引擎元数据：单一通用节点（NodeOrdinal 0）= 3D 引擎。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiGetNodeMetadata(
+    IN_CONST_HANDLE hAdapter,
+    UINT NodeOrdinalAndAdapterIndex,
+    OUT_PDXGKARG_GETNODEMETADATA pGetNodeMetadata
+    )
+{
+    static const WCHAR engineName[] = L"rokmd-3D";
+    UINT node;
+    UINT i;
+
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+
+    if (pGetNodeMetadata == NULL)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // WDDMv2：低 16 位 = node ordinal，高 16 位 = 物理适配器索引。
+    node = DXGKNODEMETADATA_GETNODEORDINAL(NodeOrdinalAndAdapterIndex);
+    if (DXGKNODEMETADATA_GETPHYSICALADAPTERINDEX(NodeOrdinalAndAdapterIndex) != 0 ||
+        node != 0)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    RtlZeroMemory(pGetNodeMetadata, sizeof(*pGetNodeMetadata));
+    pGetNodeMetadata->EngineType = DXGK_ENGINE_TYPE_3D;
+    for (i = 0; i < DXGK_MAX_METADATA_NAME_LENGTH &&
+                engineName[i] != L'\0' && (i + 1) < DXGK_MAX_METADATA_NAME_LENGTH; i++)
+    {
+        pGetNodeMetadata->FriendlyName[i] = engineName[i];
+    }
+
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+               "rokmd: GetNodeMetadata node=%u -> 3D\n", node));
+    return STATUS_SUCCESS;
+}
+
+// 中断控制 v2（同 ControlInterrupt：IH 未接线前一律拒绝）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiControlInterrupt2(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_DXGKARG_CONTROLINTERRUPT2 InterruptControl
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(InterruptControl);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// MPO 支持（v1）：显式回答"不支持"。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiCheckMultiPlaneOverlaySupport(
+    IN_CONST_HANDLE hAdapter,
+    IN_OUT_PDXGKARG_CHECKMULTIPLANEOVERLAYSUPPORT pCheckMultiPlaneOverlaySupport
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+
+    if (pCheckMultiPlaneOverlaySupport != NULL)
+    {
+        pCheckMultiPlaneOverlaySupport->Supported = FALSE;
+        RtlZeroMemory(&pCheckMultiPlaneOverlaySupport->ReturnInfo,
+                      sizeof(pCheckMultiPlaneOverlaySupport->ReturnInfo));
+    }
+    return STATUS_SUCCESS;
+}
+
+// GPU 时钟校准（TDR 历史用；SupportPerEngineTDR=0，不会被调用）。
+// _IRQL_requires_max_(DISPATCH_LEVEL)：禁止 PAGED_CODE。
+NTSTATUS
+RokDdiCalibrateGpuClock(
+    IN_CONST_HANDLE hAdapter,
+    UINT32 NodeOrdinal,
+    UINT32 EngineOrdinal,
+    OUT_PDXGKARG_CALIBRATEGPUCLOCK pClockCalibration
+    )
+{
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(NodeOrdinal);
+    UNREFERENCED_PARAMETER(EngineOrdinal);
+
+    if (pClockCalibration != NULL)
+    {
+        RtlZeroMemory(pClockCalibration, sizeof(*pClockCalibration));
+    }
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// 调度历史缓冲格式化（HistoryBuffer 精细调度未启用，不会被调用）。
+// DISPATCH_LEVEL：禁止 PAGED_CODE / 池分配。
+NTSTATUS
+RokDdiFormatHistoryBuffer(
+    IN_CONST_HANDLE hContext,
+    DXGKARG_FORMATHISTORYBUFFER* pFormatData
+    )
+{
+    UNREFERENCED_PARAMETER(hContext);
+    UNREFERENCED_PARAMETER(pFormatData);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// ---- WDDM 2.0 追加成员 ----
+// GDI 内核命令缓冲（仅 GDI 表面存在时被调用；本驱动不支持
+// GetStandardAllocationDriverData，不会有 GDI 表面）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiRenderGdi(
+    IN_CONST_HANDLE hContext,
+    INOUT_PDXGKARG_RENDERGDI pRenderGdi
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hContext);
+    UNREFERENCED_PARAMETER(pRenderGdi);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// GPU MMU 页表（GPUMMUCAPS 全零：VidMm 不经此管理 GPU VA，不会被调用）。
+// PASSIVE_LEVEL。
+VOID
+RokDdiSetRootPageTable(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETROOTPAGETABLE pSetPageTable
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetPageTable);
+}
+
+SIZE_T
+RokDdiGetRootPageTableSize(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_GETROOTPAGETABLESIZE pArgs
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pArgs);
+    // 0 = 无根页表（与 GPUMMUCAPS 全零一致）。
+    return 0;
+}
+
+// CPU host aperture 映射（仅 aperture 段存在时被调用；0 段模式不适用）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiMapCpuHostAperture(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_MAPCPUHOSTAPERTURE pArgs
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pArgs);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS
+RokDdiUnmapCpuHostAperture(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_UNMAPCPUHOSTAPERTURE pArgs
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pArgs);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// MPO 支持（v2）：显式回答"不支持"。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiCheckMultiPlaneOverlaySupport2(
+    IN_CONST_HANDLE hAdapter,
+    IN_OUT_PDXGKARG_CHECKMULTIPLANEOVERLAYSUPPORT2 pCheckMultiPlaneOverlaySupport
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+
+    if (pCheckMultiPlaneOverlaySupport != NULL)
+    {
+        pCheckMultiPlaneOverlaySupport->Supported = FALSE;
+        RtlZeroMemory(&pCheckMultiPlaneOverlaySupport->ReturnInfo,
+                      sizeof(pCheckMultiPlaneOverlaySupport->ReturnInfo));
+    }
+    return STATUS_SUCCESS;
+}
+
+// MPO 翻转地址提交（0 路 source，不会被调用）。
+// _IRQL_requires_max_(PROFILE_LEVEL - 1)：按上限处理，禁止 PAGED_CODE。
+NTSTATUS
+RokDdiSetVidPnSourceAddressWithMultiPlaneOverlay2(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY2 pSetVidPnSourceAddressWithMultiPlaneOverlay
+    )
+{
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetVidPnSourceAddressWithMultiPlaneOverlay);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// 运行时电源（SupportRuntimePowerManagement=0 不会被调用；
+// 接受句柄并忽略，保持 OS 链路畅通）。
+// _IRQL_requires_max_(PASSIVE_LEVEL)。
+NTSTATUS
+RokDdiPowerRuntimeSetDeviceHandle(
+    IN_CONST_HANDLE DriverContext,
+    HANDLE PoDeviceHandle
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(PoDeviceHandle);
+
+    if (DriverContext == NULL)
+    {
+        return STATUS_INVALID_HANDLE;
+    }
+    return STATUS_SUCCESS;
+}
+
+// 稳定电源状态（VOID：无法报错，保持无操作）。
+// PASSIVE_LEVEL。
+VOID
+RokDdiSetStablePowerState(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETSTABLEPOWERSTATE pArgs
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pArgs);
+}
+
+// 视频保护区域（内容保护；不支持即拒绝）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiSetVideoProtectedRegion(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDEOPROTECTEDREGION pArgs
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pArgs);
+    return STATUS_NOT_IMPLEMENTED;
 }

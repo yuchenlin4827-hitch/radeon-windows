@@ -79,6 +79,27 @@ DriverEntry(
     g_DdiData.DxgkDdiRecommendMonitorModes        = RokDdiRecommendMonitorModes;
     g_DdiData.DxgkDdiSetVidPnSourceAddress        = RokDdiSetVidPnSourceAddress;
     g_DdiData.DxgkDdiSetVidPnSourceVisibility     = RokDdiSetVidPnSourceVisibility;
+    g_DdiData.DxgkDdiEnumVidPnCofuncModality      = RokDdiEnumVidPnCofuncModality;
+    g_DdiData.DxgkDdiRecommendVidPnTopology       = RokDdiRecommendVidPnTopology;
+    g_DdiData.DxgkDdiGetScanLine                  = RokDdiGetScanLine;
+    g_DdiData.DxgkDdiStopCapture                  = RokDdiStopCapture;
+    g_DdiData.DxgkDdiCreateOverlay                = RokDdiCreateOverlay;
+    g_DdiData.DxgkDdiUpdateOverlay                = RokDdiUpdateOverlay;
+    g_DdiData.DxgkDdiFlipOverlay                  = RokDdiFlipOverlay;
+    g_DdiData.DxgkDdiDestroyOverlay               = RokDdiDestroyOverlay;
+    g_DdiData.DxgkDdiSetDisplayPrivateDriverFormat = RokDdiSetDisplayPrivateDriverFormat;
+
+    // ---- 遗留成员（0 段 render-only 下不可达；保签名 + NOT_IMPLEMENTED）----
+    g_DdiData.DxgkDdiAcquireSwizzlingRange = RokDdiAcquireSwizzlingRange;
+    g_DdiData.DxgkDdiReleaseSwizzlingRange = RokDdiReleaseSwizzlingRange;
+    g_DdiData.DxgkDdiSetPalette            = RokDdiSetPalette;
+    g_DdiData.DxgkDdiSetPointerPosition    = RokDdiSetPointerPosition;
+    g_DdiData.DxgkDdiSetPointerShape       = RokDdiSetPointerShape;
+
+#if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WIN7)
+    g_DdiData.DxgkDdiRenderKm               = RokDdiRenderKm;
+    g_DdiData.DxgkDdiQueryVidPnHWCapability = RokDdiQueryVidPnHWCapability;
+#endif
 
     // ---- 引擎管理 / 中断控制（WDDM 1.3+ 成员）----
     g_DdiData.DxgkDdiControlInterrupt          = RokDdiControlInterrupt;
@@ -87,6 +108,22 @@ DriverEntry(
     g_DdiData.DxgkDdiResetEngine               = RokDdiResetEngine;
 #if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WIN8)
     g_DdiData.DxgkDdiNotifySurpriseRemoval     = RokDdiNotifySurpriseRemoval;
+
+    // POST 所有权释放 / 系统显示（蓝屏渲染路径；本驱动不持有 POST，
+    // 显式拒绝即可，但成员必须非空以保证 DDI 表完整）。
+    g_DdiData.DxgkDdiStopDeviceAndReleasePostDisplayOwnership =
+        RokDdiStopDeviceAndReleasePostDisplayOwnership;
+    g_DdiData.DxgkDdiSystemDisplayEnable = RokDdiSystemDisplayEnable;
+    g_DdiData.DxgkDdiSystemDisplayWrite  = RokDdiSystemDisplayWrite;
+#endif
+
+#if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WDDM1_3)
+    // 引擎元数据 / 中断 v2 / MPO / 时钟校准 / 历史缓冲（WDDM 1.3 面）。
+    g_DdiData.DxgkDdiGetNodeMetadata          = RokDdiGetNodeMetadata;
+    g_DdiData.DxgkDdiControlInterrupt2        = RokDdiControlInterrupt2;
+    g_DdiData.DxgkDdiCheckMultiPlaneOverlaySupport = RokDdiCheckMultiPlaneOverlaySupport;
+    g_DdiData.DxgkDdiCalibrateGpuClock        = RokDdiCalibrateGpuClock;
+    g_DdiData.DxgkDdiFormatHistoryBuffer      = RokDdiFormatHistoryBuffer;
 #endif
 
 #if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WDDM2_0)
@@ -94,7 +131,23 @@ DriverEntry(
     g_DdiData.DxgkDdiSubmitCommandVirtual = RokDdiSubmitCommandVirtual;
     g_DdiData.DxgkDdiCreateProcess        = RokDdiCreateProcess;
     g_DdiData.DxgkDdiDestroyProcess       = RokDdiDestroyProcess;
+
+    // ---- WDDM 2.0 其余成员（GDI 表面 / GPU MMU / aperture / MPO2 / 电源）----
+    g_DdiData.DxgkDdiRenderGdi                       = RokDdiRenderGdi;
+    g_DdiData.DxgkDdiSetRootPageTable                = RokDdiSetRootPageTable;
+    g_DdiData.DxgkDdiGetRootPageTableSize            = RokDdiGetRootPageTableSize;
+    g_DdiData.DxgkDdiMapCpuHostAperture              = RokDdiMapCpuHostAperture;
+    g_DdiData.DxgkDdiUnmapCpuHostAperture            = RokDdiUnmapCpuHostAperture;
+    g_DdiData.DxgkDdiCheckMultiPlaneOverlaySupport2  = RokDdiCheckMultiPlaneOverlaySupport2;
+    g_DdiData.DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay2 =
+        RokDdiSetVidPnSourceAddressWithMultiPlaneOverlay2;
+    g_DdiData.DxgkDdiPowerRuntimeSetDeviceHandle = RokDdiPowerRuntimeSetDeviceHandle;
+    g_DdiData.DxgkDdiSetStablePowerState         = RokDdiSetStablePowerState;
+    g_DdiData.DxgkDdiSetVideoProtectedRegion     = RokDdiSetVideoProtectedRegion;
 #endif
+
+    // ---- TDR 恢复闭环（ResetFromTimeout 之后的续跑通知）----
+    g_DdiData.DxgkDdiRestartFromTimeout = RokDdiRestartFromTimeout;
 
     status = DxgkInitialize(DriverObject, RegistryPath, &g_DdiData);
     if (!NT_SUCCESS(status))
