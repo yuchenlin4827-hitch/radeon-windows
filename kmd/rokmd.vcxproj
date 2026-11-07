@@ -61,9 +61,18 @@
       <!-- 源码含中文注释，强制 UTF-8 编译，避免代码页告警 -->
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <PreprocessorDefinitions>NTDDI_VERSION=NTDDI_WIN10;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!--
+        WDK NuGet 布局下的显式 include 路径（工具链自动组装在 CI 上不可靠）：
+        - WDK 包 c\Include\<ver>\{km, km\crt, shared}：ntddk/wdm/dispmprt、内核 CRT、d3dkmddi
+        - SDK 包 c\Include\<ver>\{um, shared, ucrt}：um 头、d3dukmdt/d3dkmthk、UCRT
+        WDKContentRoot/RokSdkContentRoot 在 Directory.Build.props 中指向 NuGet 包布局，
+        CI 亦可经 /p: 全局属性覆盖。
+      -->
+      <AdditionalIncludeDirectories>$(WDKContentRoot)Include\10.0.26100.0\km;$(WDKContentRoot)Include\10.0.26100.0\km\crt;$(WDKContentRoot)Include\10.0.26100.0\shared;$(RokSdkContentRoot)Include\10.0.26100.0\um;$(RokSdkContentRoot)Include\10.0.26100.0\shared;$(RokSdkContentRoot)Include\10.0.26100.0\ucrt;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <TreatLinkerWarningAsErrors>false</TreatLinkerWarningAsErrors>
+      <AdditionalLibraryDirectories>$(WDKContentRoot)Lib\10.0.26100.0\km\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Inf>
       <TreatWarningAsError>false</TreatWarningAsError>
@@ -79,6 +88,7 @@
     <ClInclude Include="src\precomp.h" />
     <ClInclude Include="src\adapter.h" />
     <ClInclude Include="src\ddi.h" />
+    <ClInclude Include="src\rok_escape.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="rokmd.inf" />
