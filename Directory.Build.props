@@ -1,22 +1,21 @@
 <!--
   Directory.Build.props — MSBuild 自动导入。
-  将 WDK NuGet 的 .props 接入所有驱动工程（方案来自微软官方博客：
+  将 WDK / SDK NuGet 的 .props 接入所有驱动工程（方案来自微软官方博客：
   "Building Windows Driver Projects with CI and CD", 2025-02）。
 
   重要修正：WDK NuGet 包内 props 用 GetDirectoryName 三层上溯推导
   WDKContentRoot，在 packages\<id>\<ver>\build\native\ 布局下会少一层包
   目录（指向不存在的 packages\c），导致 stampinf.exe 等工具定位失败
   （TRK0005）。此处在其后显式覆盖为正确路径。
-  SDK 头文件/库使用 VS（windows-2022 镜像）自带的 Windows SDK 10.0.26100，
-  不再导入 SDK NuGet。
+  （SDK NuGet 的 props 自身用 2 层上溯，指向包内 c\ 是正确的，无需修正。）
 -->
 <Project>
   <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'" />
+  <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'" />
+  <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.props')" />
 
   <PropertyGroup>
     <!-- 修正 WDKContentRoot：指向 WDK NuGet 包内的 c 目录（含 Include\km 与 bin\<ver>） -->
     <WDKContentRoot Condition="'$(Platform)' == 'x64'">$(MSBuildThisFileDirectory)packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\</WDKContentRoot>
-    <WindowsSdkDir_10 Condition="'$(WindowsSdkDir)' != ''">$(WindowsSdkDir)</WindowsSdkDir_10>
-    <UCRTContentRoot Condition="'$(UCRTContentRoot)' == ''">$(WindowsSdkDir)</UCRTContentRoot>
   </PropertyGroup>
 </Project>
