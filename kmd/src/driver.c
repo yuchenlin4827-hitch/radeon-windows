@@ -19,7 +19,7 @@ DriverEntry(
     NTSTATUS status;
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
-               "rokmd: DriverEntry — Radeon Open KMD, WDDM 2.0 skeleton (M2)\n"));
+               "rokmd: DriverEntry — Radeon Open KMD, WDDM 2.0 (M2.5)\n"));
 
     RtlZeroMemory(&g_DdiData, sizeof(g_DdiData));
     g_DdiData.Version = DXGKDDI_INTERFACE_VERSION;
@@ -54,6 +54,8 @@ DriverEntry(
     g_DdiData.DxgkDdiDestroyAllocation                 = RokDdiDestroyAllocation;
     g_DdiData.DxgkDdiDescribeAllocation                = RokDdiDescribeAllocation;
     g_DdiData.DxgkDdiGetStandardAllocationDriverData   = RokDdiGetStandardAllocationDriverData;
+    g_DdiData.DxgkDdiOpenAllocation                    = RokDdiOpenAllocation;
+    g_DdiData.DxgkDdiCloseAllocation                   = RokDdiCloseAllocation;
     g_DdiData.DxgkDdiPatch                             = RokDdiPatch;
     g_DdiData.DxgkDdiSubmitCommand                     = RokDdiSubmitCommand;
     g_DdiData.DxgkDdiPreemptCommand                    = RokDdiPreemptCommand;
@@ -65,6 +67,9 @@ DriverEntry(
     g_DdiData.DxgkDdiEscape                            = RokDdiEscape;
     g_DdiData.DxgkDdiCollectDbgInfo                    = RokDdiCollectDbgInfo;
     g_DdiData.DxgkDdiResetFromTimeout                  = RokDdiResetFromTimeout;
+    g_DdiData.DxgkDdiQueryCurrentFence                 = RokDdiQueryCurrentFence;
+    g_DdiData.DxgkDdiCancelCommand                     = RokDdiCancelCommand;
+    g_DdiData.DxgkDdiControlEtwLogging                 = RokDdiControlEtwLogging;
 
     // ---- VidPn / 显示（render-only 骨架：0 路 source，通常不会被调用）----
     g_DdiData.DxgkDdiIsSupportedVidPn             = RokDdiIsSupportedVidPn;
@@ -80,10 +85,15 @@ DriverEntry(
     g_DdiData.DxgkDdiQueryDependentEngineGroup = RokDdiQueryDependentEngineGroup;
     g_DdiData.DxgkDdiQueryEngineStatus         = RokDdiQueryEngineStatus;
     g_DdiData.DxgkDdiResetEngine               = RokDdiResetEngine;
+#if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WIN8)
+    g_DdiData.DxgkDdiNotifySurpriseRemoval     = RokDdiNotifySurpriseRemoval;
+#endif
 
 #if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WDDM2_0)
-    // ---- WDDM 2.0 虚拟地址提交 ----
+    // ---- WDDM 2.0：虚拟地址提交 + 进程上下文 ----
     g_DdiData.DxgkDdiSubmitCommandVirtual = RokDdiSubmitCommandVirtual;
+    g_DdiData.DxgkDdiCreateProcess        = RokDdiCreateProcess;
+    g_DdiData.DxgkDdiDestroyProcess       = RokDdiDestroyProcess;
 #endif
 
     status = DxgkInitialize(DriverObject, RegistryPath, &g_DdiData);

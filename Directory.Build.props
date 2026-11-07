@@ -17,5 +17,9 @@
   <PropertyGroup>
     <!-- 修正 WDKContentRoot：指向 WDK NuGet 包内的 c 目录（含 Include\km 与 bin\<ver>） -->
     <WDKContentRoot Condition="'$(Platform)' == 'x64'">$(MSBuildThisFileDirectory)packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\c\</WDKContentRoot>
+    <!-- SDK 内容根：d3dkmdt/d3dukmdt（shared）与 UCRT 所在的 SDK NuGet 包 c 目录。
+         vcxproj 的 AdditionalIncludeDirectories 引用本属性，避免依赖
+         $(WindowsSdkDir)（NuGet 场景下该值可能未定义或指向已安装 SDK）。 -->
+    <RokSdkContentRoot>$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.10.0.26100.2454\c\</RokSdkContentRoot>
   </PropertyGroup>
 </Project>

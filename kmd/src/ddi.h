@@ -240,3 +240,54 @@ RokDdiSubmitCommandVirtual(
     IN_CONST_PDXGKARG_SUBMITCOMMANDVIRTUAL pSubmitCommand
     );
 
+// ---- M2.5 追加（签名同上对照 d3dkmddi.h/dispmprt.h typedef）----
+
+NTSTATUS
+RokDdiOpenAllocation(
+    IN_CONST_HANDLE hDevice,
+    IN_CONST_PDXGKARG_OPENALLOCATION pOpenAllocation
+    );
+
+NTSTATUS
+RokDdiCloseAllocation(
+    IN_CONST_HANDLE hDevice,
+    IN_CONST_PDXGKARG_CLOSEALLOCATION pCloseAllocation
+    );
+
+NTSTATUS
+RokDdiQueryCurrentFence(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_QUERYCURRENTFENCE pCurrentFence
+    );
+
+NTSTATUS
+RokDdiCancelCommand(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_CANCELCOMMAND pCancelCommand
+    );
+
+NTSTATUS
+RokDdiCreateProcess(
+    IN_CONST_HANDLE hAdapter,
+    INOUT_PDXGKARG_CREATEPROCESS pArgs
+    );
+
+NTSTATUS
+RokDdiDestroyProcess(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_HANDLE hKmdProcess
+    );
+
+VOID
+RokDdiControlEtwLogging(
+    IN_BOOLEAN Enable,
+    IN_ULONG Flags,
+    IN_UCHAR Level
+    );
+
+NTSTATUS
+RokDdiNotifySurpriseRemoval(
+    _In_ PVOID MiniportDeviceContext,
+    _In_ DXGK_SURPRISE_REMOVAL_TYPE RemovalType
+    );
+
