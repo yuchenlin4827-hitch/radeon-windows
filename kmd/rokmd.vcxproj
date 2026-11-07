@@ -25,7 +25,9 @@
     <ProjectName>rokmd</ProjectName>
     <RootNamespace>rokmd</RootNamespace>
     <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
-    <WindowsTargetPlatformVersion>$(LatestTargetPlatformVersion)</WindowsTargetPlatformVersion>
+    <!-- WindowsTargetPlatformVersion 不在此设置：$(LatestTargetPlatformVersion)
+         在 Globals 阶段尚未定义，会展开为空导致 WDKBinRoot/stampinf 路径错误；
+         交由 WDK 的 WindowsDriver.Default.props 自动选择（10.0.26100.0）。 -->
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
