@@ -273,6 +273,61 @@ static void RokProbePciDisplayDevices(void)
 }
 
 // ---------------------------------------------------------------------------
+// [1.5] Hypervisor 探测（CPUID leaf 1 ECX bit31 + leaf 0x40000000 厂商串）
+//       VM 环境装 rokmd 后 KMD 会自动进入模拟模式（kmd/src/sim.c）。
+// ---------------------------------------------------------------------------
+#if defined(_MSC_VER)
+#include <intrin.h>
+static void RokCpuid(int leaf, int regs[4]) { __cpuid(regs, leaf); }
+#else
+static void RokCpuid(int leaf, int regs[4])
+{
+    __asm__ __volatile__ ("cpuid"
+        : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(leaf), "c"(0));
+}
+#endif
+
+static void RokProbeHypervisor(void)
+{
+    static const char *sigs[] = {
+        "KVMKVMKVM\0\0\0", "Microsoft Hv", "VMwareVMware",
+        "VBoxVBoxVBox", "XenVMMXenVMM", "TCGTCGTCGTCG", "prl hyperv",
+    };
+    int regs[4];
+    char vendor[13];
+    unsigned int i, j, bit31;
+    const char *found = NULL;
+
+    printf("\n================================================================\n");
+    printf(" [1.5] Hypervisor detection (CPUID)\n");
+    printf("================================================================\n");
+
+    RokCpuid(1, regs);
+    bit31 = (unsigned int)((regs[2] >> 31) & 1u);
+    printf("  leaf1.ECX.bit31 = %u%s\n", bit31,
+           bit31 ? "  (hypervisor present)" : "  (bare metal)");
+    if (!bit31)
+        return;
+
+    RokCpuid(0x40000000, regs);
+    memcpy(vendor + 0, &regs[1], 4);
+    memcpy(vendor + 4, &regs[2], 4);
+    memcpy(vendor + 8, &regs[3], 4);
+    vendor[12] = '\0';
+    printf("  hypervisor vendor: \"%s\"\n", vendor);
+
+    for (i = 0; i < sizeof(sigs) / sizeof(sigs[0]) && found == NULL; i++)
+    {
+        for (j = 0; j < 12; j++)
+            if (vendor[j] != sigs[i][j]) break;
+        if (j == 12)
+            found = sigs[i];
+    }
+    printf("  matched: %s\n", found ? found : "(unknown hypervisor)");
+}
+
+// ---------------------------------------------------------------------------
 // [2] WDDM 适配器（D3DKMT）
 // ---------------------------------------------------------------------------
 static void RokProbeD3DKMTAdapters(void)
@@ -439,6 +494,22 @@ static void RokProbeVulkanIcdRegistry(void)
 // [3] Vulkan（动态加载）
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
+// ABI 守卫：构建系统加了 -I../../kmd/src（共享契约头）即启用 [4] 探测。
+// __has_include 在 MSVC 19.0+ / GCC 5+ / clang 全部可用；无头文件时整段
+// 编译排除，保持老构建路径兼容。
+// ---------------------------------------------------------------------------
+#if !defined(ROK_PROBE_HAS_ESCAPE_ABI)
+#  if defined(__has_include)
+#    if __has_include("rok_escape.h")
+#      define ROK_PROBE_HAS_ESCAPE_ABI 1
+#    endif
+#  endif
+#endif
+#if !defined(ROK_PROBE_HAS_ESCAPE_ABI)
+#define ROK_PROBE_HAS_ESCAPE_ABI 0
+#endif
+
+// ---------------------------------------------------------------------------
 // [4] rokmd Escape 通道（D3DKMTEscape → DxgkDdiEscape）
 //     直接编译共享契约头 kmd/src/rok_escape.h（ROK_PROBE_HAS_ESCAPE_ABI）。
 //     在装了 rokmd 的实机上，本段验证 M4 ICD 将使用的同一条 ABI 通路；
@@ -452,7 +523,9 @@ typedef union _ROK_ESC_OUT_BUF {
     ROK_ESC_VRAM_OUT          vram;
     ROK_ESC_CAPS_OUT          caps;
     ROK_ESC_SEGMENT_INFO_OUT  seg;
-    unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 64];
+    ROK_ESC_SIM_STATUS_OUT    sim;
+    ROK_ESC_CCC_SETTINGS      ccc;
+    unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 292];  // 最大 = SIM_STATUS(292)
 } ROK_ESC_OUT_BUF;
 
 static const char *RokEscFamilyName(unsigned int family)
@@ -639,6 +712,48 @@ static void RokProbeRokmdEscapeChannel(void)
                    (unsigned long long)out.seg.GartSizeBytes,
                    (unsigned)out.seg.VramSegmentId, (unsigned)out.seg.GartSegmentId,
                    (unsigned)out.seg.Flags);
+        }
+
+        // [4.6] QUERY_SIM_STATUS（M2.6：模拟设备 + PM4 解码统计）
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_SIM_STATUS,
+                   &out, sizeof(out.sim), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            ROK_U32 e;
+            printf("  QUERY_SIM   : OK  enabled=%u hv=%u regspace=%u\n",
+                   (unsigned)out.sim.Enabled,
+                   (unsigned)out.sim.HypervisorPresent,
+                   (unsigned)out.sim.RegisterSpaceSize);
+            printf("                pm4: t3=%u t0=%u t2=%u unknown=%u "
+                   "lastIB(base=0x%X,%u dw) fence=%u\n",
+                   (unsigned)out.sim.PacketCount,
+                   (unsigned)out.sim.Type0Count,
+                   (unsigned)out.sim.Type2Count,
+                   (unsigned)out.sim.UnknownOpcodes,
+                   (unsigned)out.sim.LastIndirectBaseLo,
+                   (unsigned)out.sim.LastIndirectSizeDwords,
+                   (unsigned)out.sim.LastFenceSubmitted);
+            for (e = 0; e < 64; e++)
+            {
+                if (out.sim.OpcodeCounts[e] != 0)
+                    printf("                op %#04x: %u pkts\n",
+                           (unsigned)e, (unsigned)out.sim.OpcodeCounts[e]);
+            }
+        }
+
+        // [4.7] CCC_GET_SETTINGS（M2.6：CCC 设置兼容，见 docs/ccc.md）
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_CCC_GET_SETTINGS,
+                   &out, sizeof(out.ccc), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_CCC   : OK  mask=0x%X engine=%uKHz mem=%uKHz "
+                   "od=%u fan=%u%% (source=%u)\n",
+                   (unsigned)out.ccc.ValidMask,
+                   (unsigned)out.ccc.EngineClockKHz,
+                   (unsigned)out.ccc.MemoryClockKHz,
+                   (unsigned)out.ccc.OverdriveEnable,
+                   (unsigned)out.ccc.FanSpeedPercent,
+                   (unsigned)out.ccc.Source);
         }
 
         if (hDevice != 0 && pDestroyDevice != NULL)
@@ -831,6 +946,7 @@ int main(int argc, char **argv)
     printf("目标：弄清 Windows 图形栈当前状态（PCI / WDDM / Vulkan）\n");
 
     RokProbePciDisplayDevices();
+    RokProbeHypervisor();
     RokProbeD3DKMTAdapters();
     RokProbeVulkanIcdRegistry();
     RokProbeVulkan();

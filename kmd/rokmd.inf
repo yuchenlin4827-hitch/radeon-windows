@@ -34,6 +34,13 @@ rokmd.sys = 1,,
 %ManufacturerName% = Standard,NT$ARCH$
 
 [Standard.NT$ARCH$]
+; === 模拟设备（仅虚拟机测试用！映射到 rokmd_Install_Sim，强制 sim 模式）===
+%rokmd_SimQemuAtiVga.DeviceDesc% = rokmd_Install_Sim, PCI\VEN_1002&DEV_5046
+%rokmd_SimQemuVga.DeviceDesc%    = rokmd_Install_Sim, PCI\VEN_1234&DEV_1111
+%rokmd_SimVirtualBox.DeviceDesc% = rokmd_Install_Sim, PCI\VEN_80EE&DEV_BEEF
+%rokmd_SimVmware.DeviceDesc%     = rokmd_Install_Sim, PCI\VEN_15AD&DEV_0405
+%rokmd_SimHyperV.DeviceDesc%     = rokmd_Install_Sim, PCI\VEN_1414&DEV_5353
+
 ; === 目标卡（主要验证对象）===
 %rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6840
 %rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6841
@@ -373,6 +380,30 @@ ServiceBinary = %12%\rokmd.sys
 [rokmd_CopyFiles]
 rokmd.sys
 
+; ================================================================
+; 模拟设备安装段（M2.6）—— 仅限虚拟机测试，勿在物理机安装！
+;
+; 用途：在 QEMU/Hyper-V/VirtualBox/VMware 里加载 rokmd 跑通 WDDM 管线
+;（分配/提交/fence/escape），不触碰任何真实硬件。命中模拟模型行时
+; KMD 自动进入模拟模式（sim.c）：64KB 模拟寄存器空间 + PM4 解码。
+;
+; 首选：QEMU `-device ati-vga`（呈现 1002:5046，Rage 128 PF 形态）——
+; 不会与真实 TeraScale 卡冲突。其余为常见 VM 的 VGA 设备；注意 render-only
+; 驱动无显示输出，接管 VGA 后 VM 变"无头"，请用 RDP/串口控制
+;（详见 docs/simulated-device.md）。
+; 模拟模型行见上方 [Standard.NT$ARCH$] 段首（SIMULATED 描述符）。
+; ================================================================
+[rokmd_Install_Sim]
+CopyFiles = rokmd_CopyFiles
+AddReg    = rokmd_Install_Sim.AddReg
+
+[rokmd_Install_Sim.AddReg]
+; 强制模拟模式开关（KMD 读驱动键 Parameters\SimulatedDevice）。
+HKR,"Parameters","SimulatedDevice",0x00010001,0x00000001
+
+[rokmd_Install_Sim.Services]
+AddService = rokmd,%SPSVCINST_ASSOCSERVICE%,rokmd_Service_Inst
+
 [Strings]
 SPSVCINST_ASSOCSERVICE = 0x00000002
 ManufacturerName       = "radeon-windows project"
@@ -380,3 +411,8 @@ DiskName               = "rokmd installation disk"
 rokmd_Seymour6490M.DeviceDesc = "Radeon Open KMD (Seymour / HD 6490M)"
 rokmd_Caicos7470M.DeviceDesc = "Radeon Open KMD (Caicos / HD 7470M)"
 rokmd_TeraScale.DeviceDesc = "Radeon Open KMD (AMD TeraScale)"
+rokmd_SimQemuAtiVga.DeviceDesc = "Radeon Open KMD (SIMULATED - QEMU ati-vga)"
+rokmd_SimQemuVga.DeviceDesc    = "Radeon Open KMD (SIMULATED - QEMU/Bochs VGA)"
+rokmd_SimVirtualBox.DeviceDesc = "Radeon Open KMD (SIMULATED - VirtualBox VGA)"
+rokmd_SimVmware.DeviceDesc     = "Radeon Open KMD (SIMULATED - VMware SVGA)"
+rokmd_SimHyperV.DeviceDesc     = "Radeon Open KMD (SIMULATED - Hyper-V Video)"
