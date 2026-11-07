@@ -463,8 +463,8 @@ RokDdiQueryDependentEngineGroup(
 {
     PAGED_CODE();
     UNREFERENCED_PARAMETER(hAdapter);
-    *pNodeOrdinal = 0;
-    *pEngineOrdinal = 0;
+    // 骨架：声明无其他节点依赖该引擎。
+    pQueryDependentEngineGroup->DependentNodeOrdinalMask = 0;
     return STATUS_SUCCESS;
 }
 
@@ -476,9 +476,8 @@ RokDdiQueryEngineStatus(
 {
     PAGED_CODE();
     UNREFERENCED_PARAMETER(hAdapter);
-    pEngineStatus->ChangeFlags = DXGK_ENGINE_STATUS_CHANGE_TYPE_TRANSITION;
-    pEngineStatus->Order = NodeOrdinal;
-    pEngineStatus->Ordinal = EngineOrdinal;
+    // 骨架：报告引擎正常推进，避免调度器进入恢复流程。
+    pQueryEngineStatus->EngineStatus.Responsive = 1;
     return STATUS_SUCCESS;
 }
 
