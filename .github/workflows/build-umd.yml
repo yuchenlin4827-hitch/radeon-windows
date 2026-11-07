@@ -1,0 +1,84 @@
+# umd 门控模块 + vk_audit 审计工具 CI
+#   job 1  linux-tests : gcc/clang 编译并运行单元测试（85 项检查）
+#   job 2  mingw-x64   : 交叉编译 vk_audit.exe 并上传产物
+#   job 3  msvc-x64    : MSVC 编译验证（vk_audit + 单元测试并运行）
+name: build-umd
+
+on:
+  push:
+    paths:
+      - 'umd/**'
+      - 'tests/umd/**'
+      - 'tools/vk_audit/**'
+      - '.github/workflows/build-umd.yml'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  VK_HEADERS_TAG: v1.4.330   # KhronosGroup/Vulkan-Headers（Apache-2.0 OR MIT）
+
+jobs:
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests (gcc, C11)
+        run: bash tests/umd/build.sh
+
+  mingw-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Build vk_audit.exe
+        env:
+          VK_INCLUDE_DIR: ${{ github.workspace }}/.cache/vulkan-headers/include
+        run: bash tools/vk_audit/build-mingw.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vk_audit-mingw-x64
+          path: tools/vk_audit/vk_audit.exe
+
+  msvc-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Vulkan-Headers (pinned)
+        shell: pwsh
+        run: |
+          $base = "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Headers/$env:VK_HEADERS_TAG/include"
+          New-Item -ItemType Directory -Force -Path .cache/vulkan-headers/include/vulkan, .cache/vulkan-headers/include/vk_video | Out-Null
+          foreach ($h in 'vk_platform.h','vulkan.h','vulkan_core.h') {
+            Invoke-WebRequest -Uri "$base/vulkan/$h" -OutFile ".cache/vulkan-headers/include/vulkan/$h"
+          }
+          foreach ($h in 'vulkan_video_codec_h264std.h','vulkan_video_codec_h265std.h','vulkan_video_codec_h264std_decode.h','vulkan_video_codec_h264std_encode.h','vulkan_video_codec_h265std_decode.h','vulkan_video_codec_h265std_encode.h','vulkan_video_codec_av1std.h','vulkan_video_codec_av1std_decode.h','vulkan_video_codec_av1std_encode.h','vulkan_video_codec_vp9std.h','vulkan_video_codec_vp9std_decode.h','vulkan_video_codecs_common.h') {
+            Invoke-WebRequest -Uri "$base/vk_video/$h" -OutFile ".cache/vulkan-headers/include/vk_video/$h"
+          }
+      - name: Build & run unit tests (MSVC)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /utf-8 /std:c11 /W4 /O2 /Fe:test_umd-msvc.exe ^
+            tests\umd\test_umd.c ^
+            umd\vk13\vk13_promoted.c ^
+            umd\vk13\vk13_features.c ^
+            umd\gl46\gl46_r600g.c ^
+            umd\gl46\gl46_zink.c ^
+            /Iumd\vk13 /Iumd\gl46
+          .\test_umd-msvc.exe
+      - name: Build vk_audit (MSVC)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /utf-8 /std:c11 /W4 /O2 /Fe:vk_audit-msvc.exe ^
+            tools\vk_audit\vk_audit.c ^
+            umd\vk13\vk13_promoted.c ^
+            umd\vk13\vk13_features.c ^
+            umd\gl46\gl46_r600g.c ^
+            umd\gl46\gl46_zink.c ^
+            /Iumd\vk13 /Iumd\gl46 /I.cache\vulkan-headers\include
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vk_audit-msvc-x64
+          path: vk_audit-msvc.exe
