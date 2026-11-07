@@ -108,9 +108,9 @@ msbuild /t:build kmd\rokmd.vcxproj /p:Configuration=Release /p:Platform=x64
 
 | 阶段 | 目标 | 状态 |
 | --- | --- | --- |
-| M0 | 仓库 / CI / 探测工具 / 文档 | ✅ |
+| M0 | 仓库 / CI / 探测工具 / 文档 | ✅（CI 绿灯，rokmd.sys 产出） |
 | M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 |
-| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架已写 |
+| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架编译通过（CI 产出 .sys），待实机加载验证 |
 | M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先） |
 | M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜ |
 | M5 | Zink（GL）可行性验证：Vulkan 1.1 → GL 4.5 | ⬜ |
