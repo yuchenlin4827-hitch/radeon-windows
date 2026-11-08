@@ -58,7 +58,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <!-- 关键：TargetExt 必须在 Microsoft.Cpp.props 导入之后设置才能生效
+         （Cpp.props 会把 DynamicLibrary 的默认 .dll 无条件覆盖进来）；
+         放在 Configuration 组里会在导入时被清掉，产物变成 rokmd.dll -->
+    <TargetExt>.sys</TargetExt>
+  </PropertyGroup>
 
   <ItemDefinitionGroup>
     <ClCompile>
@@ -93,6 +98,8 @@
       <EntryPointSymbol>GsDriverEntry</EntryPointSymbol>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <AdditionalDependencies>displib.lib;ntoskrnl.lib;hal.lib;BufferOverflowK.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- 双保险：直接指定链接输出文件名，不依赖 TargetExt 的求值顺序 -->
+      <OutputFile>$(OutDir)$(TargetName).sys</OutputFile>
       <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Inf>
