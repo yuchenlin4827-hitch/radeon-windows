@@ -269,16 +269,19 @@ static void RunPassSimulated(VOID)
                         TRUE, 0xFDE00000ULL, 0x10000);
     RokVdxgSetDriverKeyPath(driverKey);
 
-    // CCC（官方 Catalyst 体系）驱动键值 —— rokmd 专有名。
+    // CCC（官方 Catalyst 体系）驱动键值 —— rokmd 专有名；
+    // 另加 M3.1 的 sim 显存覆盖 Parameters\VramSizeMb=512（默认 256）。
     {
         ROK_MOCK_REG_VALUE seed[] = {
             { driverKey, L"Overdrive", 1 },
             { driverKey, L"OverdriveEngineClockKHz", 900000 },
             { driverKey, L"OverdriveMemoryClockKHz", 1150000 },
             { driverKey, L"OverdriveFanSpeedPercent", 60 },
+            { L"\\REGISTRY\\MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0001\\Parameters",
+              L"VramSizeMb", 512 },
         };
         int i;
-        for (i = 0; i < 4; i++) { rok_mock_registry[i] = seed[i]; }
+        for (i = 0; i < 5; i++) { rok_mock_registry[i] = seed[i]; }
     }
 
     poolBefore = RokMockPoolOutstanding();
@@ -296,7 +299,6 @@ static void RunPassSimulated(VOID)
         DXGK_DRIVERCAPS caps;
         DXGK_QUERYSEGMENTOUT4 seg4;
         DXGK_GPUMMUCAPS mmu;
-
         memset(&q, 0, sizeof(q));
         q.Type = DXGKQAITYPE_DRIVERCAPS;
         q.pOutputData = &caps;
@@ -325,6 +327,41 @@ static void RunPassSimulated(VOID)
         st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
         CHECK(NT_SUCCESS(st));
         CHECK(mmu.ReadOnly32BitRegisters == FALSE && mmu.Reserved == 0);
+
+        // ---- M2.8 追加类型：电源组件数 / 段无效内存范围 / 显示扩展能力 ----
+        {
+            UINT nPower;
+            DXGK_QUERYSEGMENTMEMORYSTATE memState;
+            DXGK_DISPLAY_DRIVERCAPS_EXTENSION extCaps;
+
+            memset(&q, 0, sizeof(q));
+            q.Type = DXGKQAITYPE_NUMPOWERCOMPONENTS;
+            q.pOutputData = &nPower;
+            q.OutputDataSize = sizeof(nPower);
+            memset(&nPower, 0xAA, sizeof(nPower));
+            st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
+            CHECK(NT_SUCCESS(st));
+            CHECK(nPower == 0);     // 无电源组件（配套 FState 拒绝语义）
+
+            memset(&q, 0, sizeof(q));
+            q.Type = DXGKQAITYPE_SEGMENTMEMORYSTATE;
+            q.pOutputData = &memState;
+            q.OutputDataSize = sizeof(memState);
+            memset(&memState, 0xAA, sizeof(memState));
+            st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
+            CHECK(NT_SUCCESS(st));
+            CHECK(memState.NumInvalidMemoryRanges == 0);    // 0 段模式恒 0 条
+            CHECK(memState.pMemoryRanges == NULL);
+
+            memset(&q, 0, sizeof(q));
+            q.Type = DXGKQAITYPE_DISPLAY_DRIVERCAPS_EXTENSION;
+            q.pOutputData = &extCaps;
+            q.OutputDataSize = sizeof(extCaps);
+            memset(&extCaps, 0xAA, sizeof(extCaps));
+            st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
+            CHECK(NT_SUCCESS(st));
+            CHECK(extCaps.Caps.Value == 0);                 // render-only 全 0
+        }
     }
 
     // ---- 进程 / 设备 / 分配 / 上下文 ----
@@ -575,6 +612,28 @@ static void RunPassSimulated(VOID)
             CHECK(ccc.Source == ROK_ESC_CCC_SOURCE_ESCAPE);
         }
 
+        // ---- M3.1 追加 escape 面：VRAM / SEGINFO（sim 覆盖值生效）----
+        {
+            ROK_ESC_VRAM_OUT vram;
+            ROK_ESC_SEGMENT_INFO_OUT segInfo;
+
+            stEsc = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_VRAM,
+                                   &vram, sizeof(vram));
+            CHECK(NT_SUCCESS(stEsc));
+            CHECK(vram.VramSizeBytes == 512ULL * 1024ULL * 1024ULL);
+            CHECK(vram.GartSizeBytes == 0);         // GTT 未落地（M3.2）
+            CHECK(vram.VramSegmentId == 0);         // 0 段模式
+
+            stEsc = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_SEGMENT_INFO,
+                                   &segInfo, sizeof(segInfo));
+            CHECK(NT_SUCCESS(stEsc));
+            CHECK(segInfo.VramSizeBytes == 512ULL * 1024ULL * 1024ULL);
+            CHECK(segInfo.GartSizeBytes == 0);
+            CHECK(segInfo.VramSegmentId == 0);
+            CHECK(segInfo.GartSegmentId == 0);
+            CHECK(segInfo.Flags == ROK_SEG_FLAG_VRAM_POPULATED);
+        }
+
         // ---- escape 负例 ----
         smallBuf[0] = 0;
         stEsc = RokEscape(c.hAdapter, ROK_ESC_TYPE_QUERY_VERSION, sizeof(ver),
@@ -610,6 +669,7 @@ static void RunPassSimulated(VOID)
         CHECK(qdg.DependentNodeOrdinalMask == 1);
 
         memset(&qes, 0, sizeof(qes));
+        qes.EngineOrdinal = 0;
         st = c.ddi->DxgkDdiQueryEngineStatus(c.hAdapter, &qes);
         CHECK(NT_SUCCESS(st));
         CHECK(qes.EngineStatus.Responsive == 1);
@@ -645,6 +705,37 @@ static void RunPassSimulated(VOID)
         CHECK(NT_SUCCESS(c.ddi->DxgkDdiCreateProcess(c.hAdapter, &cp2)));
         CHECK(cp2.hKmdProcess != NULL);
         c.ddi->DxgkDdiDestroyProcess(c.hAdapter, cp2.hKmdProcess);
+    }
+
+    // ---- M2.8 追加 DDI 面：LDA/电源组件/PEP/P-state/MPO v1
+    //      （签名绑定 + 与能力声明一致的确定性答复）----
+    {
+        LINKED_DEVICE linked;
+        GUID ctrlCode;
+        SIZE_T bytesReturned;
+        DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY mpo1;
+
+        memset(&linked, 0, sizeof(linked));
+        CHECK(c.ddi->DxgkDdiLinkDevice((PDEVICE_OBJECT)(UINT_PTR)0x6000,
+                                       c.hAdapter, &linked)
+              == STATUS_NOT_SUPPORTED);                     // 单适配器明确拒绝
+
+        CHECK(c.ddi->DxgkDdiSetPowerComponentFState(c.hAdapter, 0, 0)
+              == STATUS_INVALID_PARAMETER);                 // 组件不存在语义
+
+        memset(&ctrlCode, 0, sizeof(ctrlCode));
+        bytesReturned = 0x1234;
+        CHECK(c.ddi->DxgkDdiPowerRuntimeControlRequest(
+                  c.hAdapter, &ctrlCode, NULL, 0, NULL, 0, &bytesReturned)
+              == STATUS_NOT_SUPPORTED);                     // runtime pm 未启用
+        CHECK(bytesReturned == 0);                          // 回执字节数必清零
+
+        CHECK(c.ddi->DxgkDdiSetPowerPState(c.hAdapter, 0, 0)
+              == STATUS_NOT_SUPPORTED);                     // 无时钟控制路径
+
+        memset(&mpo1, 0, sizeof(mpo1));
+        CHECK(c.ddi->DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay(
+                  c.hAdapter, &mpo1) == STATUS_NOT_IMPLEMENTED);    // 0 路 source
     }
 
     // ---- 拆除：链表/池全平衡（ASan leak 核对）----
@@ -754,6 +845,23 @@ static void RunPassRealHardware(VOID)
         CHECK(sim.PacketCount == 0);        // 真实硬件不解码
     }
 
+    // M3.1 escape：真实形态 BAR0 内容全 0 → CONFIG_MEMSIZE=0 出界 →
+    // 不上报显存（诚实边界：探测值不满足阈值范围时宁可不报）。
+    {
+        ROK_ESC_VRAM_OUT vram;
+        ROK_ESC_SEGMENT_INFO_OUT segInfo;
+
+        st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_VRAM,
+                            &vram, sizeof(vram));
+        CHECK(NT_SUCCESS(st));
+        CHECK(vram.VramSizeBytes == 0);
+
+        st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_SEGMENT_INFO,
+                            &segInfo, sizeof(segInfo));
+        CHECK(NT_SUCCESS(st));
+        CHECK(segInfo.Flags == 0);          // 未 POPULATED
+    }
+
     RokE2ETeardown(&c);
     CHECK(RokMockPoolOutstanding() == poolBefore);
 }
@@ -813,6 +921,13 @@ static void RunDdiTableChecks(VOID)
     CHECK(ddi->DxgkDdiEscape != NULL);
     CHECK(ddi->DxgkDdiQueryCurrentFence != NULL);
     CHECK(ddi->DxgkDdiGetNodeMetadata != NULL);         // WDDM 1.3 面
+
+    // M2.8 追加成员点名（0x5023 版本全表非空的最后一批）。
+    CHECK(ddi->DxgkDdiLinkDevice != NULL);
+    CHECK(ddi->DxgkDdiSetPowerComponentFState != NULL);
+    CHECK(ddi->DxgkDdiPowerRuntimeControlRequest != NULL);
+    CHECK(ddi->DxgkDdiSetPowerPState != NULL);
+    CHECK(ddi->DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay != NULL);
 }
 
 // ------------------------------------------------------------------

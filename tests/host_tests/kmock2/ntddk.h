@@ -64,6 +64,16 @@ typedef UCHAR*          PUCHAR;
 typedef USHORT*         PUSHORT;
 typedef HANDLE*         PHANDLE;
 typedef PVOID*          PPVOID;
+typedef SIZE_T*         PSIZE_T;
+
+// ---- GUID（PowerRuntimeControlRequest 的控制码参数）----
+typedef struct _GUID {
+    ULONG   Data1;
+    USHORT  Data2;
+    USHORT  Data3;
+    UCHAR   Data4[8];
+} GUID;
+typedef const GUID *LPCGUID;
 
 #ifndef CONST
 #define CONST const
@@ -92,6 +102,16 @@ typedef PVOID*          PPVOID;
 #endif
 
 // ---- SAL 标注（宿主全为空）----
+// WDM 遗留 IN/OUT/OPTIONAL 宏（ddi.h M2.8 新成员签名沿用 WDK 拼写）。
+#ifndef IN
+#define IN
+#endif
+#ifndef OUT
+#define OUT
+#endif
+#ifndef OPTIONAL
+#define OPTIONAL
+#endif
 #define _In_
 #define _Out_
 #define _Inout_
@@ -139,6 +159,8 @@ typedef PVOID*          PPVOID;
 #define INOUT_PDXGK_CHILD_STATUS            DXGK_CHILD_STATUS*
 #define INOUT_PDXGK_DEVICE_DESCRIPTOR       DXGK_DEVICE_DESCRIPTOR*
 #define INOUT_PDXGK_CHILD_CONTAINER_ID      DXGK_CHILD_CONTAINER_ID*
+// LDA 链接协商（LinkDevice 第三参数，实为指针类型，WDK 同款拼写）。
+#define INOUT_PLINKED_DEVICE                PLINKED_DEVICE
 
 // ---- ntintsafe / WDM 前向类型（SetPowerState/NotifyAcpiEvent 桩参数）----
 typedef enum _DEVICE_POWER_STATE { PowerDeviceUnspecified = 0, PowerDeviceD3 = 4 } DEVICE_POWER_STATE;
@@ -179,6 +201,11 @@ typedef struct _LIST_ENTRY {
     struct _LIST_ENTRY *Blink;
 } LIST_ENTRY, *PLIST_ENTRY;
 
+// LINKED_DEVICE（DxgkDdiLinkDevice 参数；驱动明确拒绝 LDA，仅保签名）。
+typedef struct _LINKED_DEVICE {
+    ULONG Dummy;
+} LINKED_DEVICE, *PLINKED_DEVICE;
+
 #define CONTAINING_RECORD(addr, type, field) \
     ((type *)((CHAR *)(addr) - offsetof(type, field)))
 
@@ -202,29 +229,25 @@ static __inline LONG RokM2InterlockedExchange(volatile LONG *Target, LONG Value)
 #define InterlockedExchange(Target, Value) \
     RokM2InterlockedExchange((volatile LONG *)(Target), (LONG)(Value))
 
-static __inline LONG RokM2InterlockedCompareExchange(volatile LONG *Destination,
-                                                     LONG Exchange, LONG Comparand)
-{
-    return (LONG)__sync_val_compare_and_swap(Destination, Comparand, Exchange);
-}
-#define InterlockedCompareExchange(Destination, Exchange, Comparand) \
-    RokM2InterlockedCompareExchange((volatile LONG *)(Destination), (LONG)(Exchange), (LONG)(Comparand))
-
 static __inline LONG RokM2InterlockedIncrement(volatile LONG *Addend)
 {
-    return (LONG)__sync_add_and_fetch(Addend, 1);
+    return __atomic_add_fetch(Addend, 1, __ATOMIC_SEQ_CST);
 }
-#define InterlockedIncrement(Addend) RokM2InterlockedIncrement((volatile LONG *)(Addend))
+#define InterlockedIncrement(Addend) \
+    RokM2InterlockedIncrement((volatile LONG *)(Addend))
 
-// ---- GUID / LPCGUID / PSIZE_T（PowerRuntimeControlRequest 签名用）----
-typedef struct _GUID {
-    ULONG Data1;
-    USHORT Data2;
-    USHORT Data3;
-    UCHAR Data4[8];
-} GUID;
-typedef const GUID *LPCGUID;
-typedef SIZE_T *PSIZE_T;
+// WDK 语义：始终返回 Destination 的原值（交换前）。
+// GCC builtin 无论成败都会把 Destination 原值写回 expected（此处 Comperand）。
+static __inline LONG RokM2InterlockedCompareExchange(volatile LONG *Destination,
+                                                     LONG Exchange, LONG Comperand)
+{
+    __atomic_compare_exchange_n(Destination, &Comperand, Exchange, 0,
+                                __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return Comperand;
+}
+#define InterlockedCompareExchange(Destination, Exchange, Comperand) \
+    RokM2InterlockedCompareExchange((volatile LONG *)(Destination), \
+                                    (LONG)(Exchange), (LONG)(Comperand))
 
 // ---- NTSTATUS ----
 typedef LONG NTSTATUS;
@@ -262,6 +285,14 @@ void rok_kdprintf(ULONG Component, ULONG Level, PCSTR Fmt, ...);
 #define RtlCopyMemory(d, s, l)  memcpy((d), (s), (l))
 #define RtlFillMemory(d, l, f)  memset((d), (f), (l))
 #define RtlEqualMemory(a, b, l) (memcmp((a), (b), (l)) == 0)
+
+// ---- 寄存器访问原语（宿主 = volatile 解引用；真机 MMIO 语义由硬件保证）----
+#define READ_REGISTER_ULONG(reg)    (*(volatile ULONG *)(reg))
+#define WRITE_REGISTER_ULONG(reg,v) ((void)(*(volatile ULONG *)(reg) = (ULONG)(v)))
+#define READ_REGISTER_USHORT(reg)   (*(volatile USHORT *)(reg))
+#define WRITE_REGISTER_USHORT(reg,v)((void)(*(volatile USHORT *)(reg) = (USHORT)(v)))
+#define READ_REGISTER_UCHAR(reg)    (*(volatile UCHAR *)(reg))
+#define WRITE_REGISTER_UCHAR(reg,v) ((void)(*(volatile UCHAR *)(reg) = (UCHAR)(v)))
 
 // ---- 池分配（malloc 底座 + tag 记账，E2E 退出前核对平衡）----
 typedef enum _POOL_TYPE { NonPagedPool = 0, PagedPool = 1 } POOL_TYPE;
