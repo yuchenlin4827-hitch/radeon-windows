@@ -21,5 +21,7 @@
          vcxproj 的 AdditionalIncludeDirectories 引用本属性，避免依赖
          $(WindowsSdkDir)（NuGet 场景下该值可能未定义或指向已安装 SDK）。 -->
     <RokSdkContentRoot>$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.10.0.26100.2454\c\</RokSdkContentRoot>
+    <!-- SDK x64 架构库根：um\x64（uuid.lib 等，供驱动链接 GUID 实例化） -->
+    <RokSdkX64ContentRoot Condition="'$(Platform)' == 'x64'">$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.2454\c\</RokSdkX64ContentRoot>
   </PropertyGroup>
 </Project>
