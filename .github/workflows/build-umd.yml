@@ -77,7 +77,10 @@ jobs:
             umd\vk13\vk13_features.c ^
             umd\gl46\gl46_r600g.c ^
             umd\gl46\gl46_zink.c ^
-            /Iumd\vk13 /Iumd\gl46 /I.cache\vulkan-headers\include
+            /Iumd\vk13 /Iumd\gl46 /I.cache\vulkan-headers\include ^
+            advapi32.lib
+          :: MSVC 不自动链接 advapi32（mingw 默认链接所以此前未暴露）——
+          :: vk_audit 的 ICD 注册表扫描需要 RegOpenKeyExA/RegEnumValueA/RegCloseKey。
       - uses: actions/upload-artifact@v4
         with:
           name: vk_audit-msvc-x64
