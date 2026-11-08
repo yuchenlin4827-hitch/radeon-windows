@@ -60,9 +60,18 @@
   即"冲 1.1 换 GL 4.5"是一条性价比相对高的路线；GL 4.6 需要 Vulkan 1.3，
   对 TeraScale 不设为目标）。
 
+> **2026-11 决策更新（M5.5/M7）**：
+> 1. Vulkan 目标重设为 **1.3（M5.5）**：逐特性计划见
+>    [vulkan13-plan.md](vulkan13-plan.md)（promoted 23/24/23、
+>    无条件核心特性 24 项）；1.4 维持不做。
+> 2. **OpenGL 4.6 不再依赖 Vulkan 版本**：Mesa 25.2 起 r600 驱动在
+>    evergreen+ 完成 GL 4.6，主路线改为 R600g 原生移植（M7），
+>    依据与方案见 [r600g-gl46.md](r600g-gl46.md)；本节旧表中的
+>    "GL 4.6 → Vulkan 1.3"约束仅适用于 Zink 备选路线。
+
 ## 3. 对路线图的影响
 
 - M2–M4（KMD / terakan 对接）：维持 WDDM 2.0 + Vulkan 1.0，不变。
-- M5（GL 评估）：目标改为"Zink + Vulkan 1.1 → GL 4.5"为主攻，
-  GL 4.6 降级为远期观察项。
-- 该决策写入 roadmap.md 的 M5 描述。
+- M5（GL 评估）：原结论保留存档；主攻改由 M5.5（Vulkan 1.3）与
+  M7（R600g GL 4.6）承接，见 roadmap.md。
+- ~~该决策写入 roadmap.md 的 M5 描述~~（已更新：M5 存档，M5.5/M7 增补）。

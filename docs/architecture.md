@@ -75,8 +75,9 @@ Windows 上所有 GPU 都必须以 **WDDM（Windows Display Driver Model）** �
 ┌───────────────────────────────────────────────────┐
 │ 应用                                              │
 ├──────────────────────┬────────────────────────────┤
-│ Vulkan: terakan(1.0, │ GL: r600(≤4.5)/radeonsi(4.6)│
-│  TeraScale) RADV(GCN)│ D3D12: 无（Proton 场景用    │
+│ Vulkan: terakan(1.0→1.3,│ GL: r600(4.6, evergreen+； │
+│  TeraScale) RADV(GCN)│  2025-06 Mesa 25.2 起)     │
+│                      │ D3D12: 无（Proton 场景用    │
 │                      │  vkd3d-proton=DX12→Vulkan） │
 ├──────────────────────┴────────────────────────────┤
 │ libdrm（用户态内核接口封装 + 命令提交 ioctl）        │
@@ -120,11 +121,17 @@ M1 的调研重点，结论会更新到 [research/terakan.md](research/terakan.m
 
 ### 路线 C（长线）：GL 4.6 与 DX12
 
-- **GL 4.6**：两条可能路径——Mesa `r600` gallium 移植（上限 4.5，不够）或
-  Zink（GL-on-Vulkan，4.6 要求 Vulkan 1.3 基座）。terakan 目前是 Vulkan 1.0，
-  因此 GL 4.6 的前置条件是"terakan 或接续者把 Vulkan 拉到 1.3"，这是 M5 评估项。
+- **GL 4.6（主路线 = R600g 原生移植，M7）**：Mesa r600 驱动已在 evergreen+
+  （TeraScale 2/3）完成 GL 4.6（Mesa 25.2，2025-06；`features.txt` GL 4.6 行 +
+  `r600_pipe.c:495` 硬件门），且无 LLVM 依赖。Windows 侧需新增 WDDM winsys +
+  WGL 前端，**与 Vulkan 版本完全解耦**。方案见 [r600g-gl46.md](r600g-gl46.md)。
+- **GL 4.6（备选 = Zink）**：GL-on-Vulkan；Mesa 官方 profile
+  （VP_ZINK_gl46_baseline）要求 Vulkan 1.3 基座——M5.5 达成后门控全绿。
+- **Vulkan 1.3（M5.5）**：terakan 逐特性冲 1.3（promoted 23/24/23 + 核心
+  必选 24 项），计划见 [vulkan13-plan.md](vulkan13-plan.md)；
+  门控/验证由 `umd/vk13/`、`tools/vk_audit/` 承担。
 - **DX12**：Windows 不允许替换系统 `d3d12.dll` 的 DDI 语义；开源路径实质是
-  vkd3d-proton 式 API 转换层（DX12 API → Vulkan），同样卡在 Vulkan 1.3 前置。
+  vkd3d-proton 式 API 转换层（DX12 API → Vulkan），卡在 Vulkan 1.3 前置。
   M6 只做评估，不做承诺。
 
 ## 4. 组件依赖关系（Mermaid）
@@ -134,16 +141,20 @@ flowchart TD
     subgraph Linux来源
         RA[内核 radeon/amdgpu\nGPL-2.0] -->|硬件编程知识| KMD
         TERA[terakan\nMIT] -->|PM4/着色器路径| UMD
+        R600G[r600 gallium 驱动\nMIT，GL 4.6@evergreen+] -->|Gallium 代码路径| WGLF[WGL 前端+winsys\nM7 新增]
     end
     subgraph Windows本项目
         KMD[rokmd.sys\nWDDM 2.0 KMD] --> DXGK[dxgkrnl.sys]
-        UMD[terakan_icd.dll\nVulkan 1.0 ICD] --> LOADER[vulkan-1.dll Loader]
+        UMD[terakan_icd.dll\nVulkan 1.0→1.3 ICD] --> LOADER[vulkan-1.dll Loader]
+        WGLF --> ROKGL[r600g_gl.dll\nOpenGL 4.6 ICD]
+        ROKGL -.M7: 换接自研KMD .-> KMD
         UMD -. M4: 换接自研KMD .-> KMD
         PROBE[gpu_probe.exe] --> DXGK
         PROBE --> LOADER
+        AUDIT[vk_audit.exe\n1.3/GL4.6 门控审计] --> LOADER
     end
     DXGK --> HW[(TeraScale GPU\nHD 2000-6000)]
-    HW --> APP[应用/vkcube]
+    HW --> APP[应用/vkcube/OpenGL 应用]
 ```
 
 ## 5. 风险清单
@@ -152,8 +163,9 @@ flowchart TD
    NuGet WDK 最新版为准，CI 报错即修。
 2. **TDR/BSOD 迭代成本**：KMD 崩溃即蓝屏，M2/M3 阶段必须配双机调试（WinDbg +
    1394/网络）或 Hyper-V Gen1 实验机，`roadmap` 里安排了对应的验收门。
-3. **Vulkan 1.3 上限**：GL4.6/DX12 两条长线全部卡在 ICD 的 Vulkan 版本，
-   该依赖已显式写进路线图，避免中途盲目加需求。
+3. **Vulkan 1.3 与 GL 4.6 的依赖关系已解耦**：GL 4.6 主路线是 R600g 原生移植
+   （不依赖 Vulkan 版本）；只有 Zink 备选路线和 DX12 转换层仍卡 Vulkan 1.3。
+   该变更已同步到路线图（M5.5/M7），避免中途盲目加需求。
 4. **许可混合**：GPL-2.0（内核移植段）与 MIT（新代码）必须按文件标注，
    详见 [licensing.md](licensing.md)。
 5. **terakan 依赖边界未定**：若 terakan Windows 路径强依赖官方 Catalyst KMD，
