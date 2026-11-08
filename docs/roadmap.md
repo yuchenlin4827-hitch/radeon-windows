@@ -5,6 +5,8 @@
 > 自动产出 rokmd.sys（WDK NuGet + VS2022），待实机加载验证；
 > 2026-11 增补 M5.5（Vulkan 1.3）与 M7（R600g GL 4.6），原 M5 保留并加注；
 > 2026-11 M2.8：WDDM 2.0 (0x5023) DDI 表全量补齐（机械验证无 NULL 成员）。
+> 2026-11 实机基线：HD 7470M（Win11 26100）上官方 Vulkan 栈实测不可用
+> （vk_audit v1.2：manifest/DLL 完整仍 -9），详见「实机基线」一节。
 
 每个阶段都有明确的"验收门"（DoD），未过验收不进入下一阶段。
 
@@ -44,8 +46,6 @@
 
 **目标**：`rokmd.sys` 能被 Windows 加载、在设备管理器中启动，不蓝屏、不点屏。
 
-- ✅ `DriverEntry` + `DxgkInitialize` DDI 注册
-- ✅ `AddDevice`（PDO 绑定 + 上下文分配）、`StartDevice`（BAR/IRQ 资源枚举 + 日志）
 - ✅ `DriverEntry` + `DxgkInitialize` DDI 注册
 - ✅ `AddDevice`（PDO 绑定 + 上下文分配）、`StartDevice`（BAR/IRQ 资源枚举 + 日志）
 - ✅ M2.5：QueryAdapterInfo（DRIVERCAPS/SEGMENT/GPUMMUCAPS）、分配/上下文/
@@ -129,7 +129,9 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 
 - 差距清单与 VLIW 可行性逐项评估：[vulkan13-plan.md](vulkan13-plan.md)
 - 门控数据与单测：`umd/vk13/`（promoted 表 + 必选特性表，纯 C11）
-- 实机审计：`tools/vk_audit/`（vk_audit.exe，逐设备报 1.1/1.2/1.3 缺口）
+- 实机审计：`tools/vk_audit/`（vk_audit.exe，逐设备报 1.1/1.2/1.3 缺口；
+  v1.2 起逐份解析注册表 ICD manifest→DLL，可区分「残留注册表」与
+  「DLL 在但硬件不支持」，已在 HD 7470M 实机验证，见「实机基线」一节）
 
 **验收门**：vk_audit.exe 在 terakan ICD 上报 "1.3 REACHABLE"；
 vkcube + dota2-vulkan 冒烟无回归。
@@ -161,6 +163,51 @@ vkcube + dota2-vulkan 冒烟无回归。
 
 **验收门**：wglinfo 报 OpenGL 4.6（HD 6490M / HD 7470M）；
 glmark2 与一致性子集无回归；干净系统（无 Catalyst）+ rokmd 下可运行。
+
+---
+
+## 实机基线（2026-11-08，HD 7470M）✅
+
+**机器**：AMD Radeon HD 7470M（M3 所列 TeraScale 2 验证卡，与 HD 6490M
+同为项目目标卡）＋ Windows 11 26100。
+
+**实测**（vk_audit v1.2，125,952 字节，main 0ab3966）：
+
+```text
+  loader DLL  : C:\Windows\SYSTEM32\vulkan-1.dll
+  vkCreateInstance failed, VkResult=-9 (VK_ERROR_INCOMPATIBLE_DRIVER)
+  VK_DRIVER_FILES / VK_ICD_FILENAMES: (not set)
+  registry ICDs (64-bit view):
+    [0] C:\Windows\System32\amd-vulkan64.json
+        library_path  : .\amdvlk64.dll -> C:\Windows\System32\.\amdvlk64.dll  [DLL present]
+  registry ICDs (32-bit view):
+    [0] C:\Windows\SysWOW64\amd-vulkan32.json
+        library_path  : .\amdvlk32.dll -> C:\Windows\SysWOW64\.\amdvlk32.dll  [DLL present]
+  -> 2 of 2 ICD manifest(s) resolve to an existing driver DLL.
+```
+
+（两份 manifest 均未携带 api_version 键，v1.2 对该键的支持已就绪但此处
+无输出，符合旧式简表特征。）
+
+**判读**：
+
+1. 加载器、manifest、ICD DLL 三层全部在位 → 排除「残留注册表 / 文件丢失」
+   假设，v1.2 的「DLL 在但硬件不支持」分类首次实机验证通过。
+2. `vkCreateInstance` 仍报 -9：ICD 被加载但对本机枚举 0 设备——官方
+   Windows Vulkan 栈（amdvlk64/amdvlk32，随 Adrenalin 安装）自 GCN 1.0
+   （HD 7700 系）起支持，TeraScale 2 在支持矩阵之外（与
+   [wddm-vulkan-limits.md](wddm-vulkan-limits.md) 2.2 节「RADV = GCN 1+」
+   互证；terakan 的存在正因为官方栈覆盖不到 TeraScale）。
+3. **结论：该机「官方栈的 Vulkan」为零基线**——任何自研 ICD 只要从
+   rokmd 上枚举出 1 个设备即为净增益。
+
+**对里程碑的意义**：
+
+- **M1**：目标卡「装老 Catalyst」对照组的 Vulkan 预期同为 -9，
+  vkcube 验收只能由 terakan/自研 ICD 达成；
+- **M4**：干净系统 + rokmd + terakan 的验收前提（零基线）已实测钉死；
+- **M5.5**：vk_audit v1.2 分类能力实机验证通过，M1/M4 基线数据归档完毕；
+- **M7**：R600g GL 4.6 路线与 Vulkan 栈解耦，本基线不构成约束。
 
 ---
 
