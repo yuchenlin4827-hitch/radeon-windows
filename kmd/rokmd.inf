@@ -4,7 +4,10 @@
 ; 设备 ID 覆盖 AMD TeraScale 全家族（TS1/TS2/TS3，含 APU），共 306 个设备，
 ; 来源：Linux 内核 include/drm/drm_pciids.h 的 radeon_PCI_IDS 表（GPL-2.0，
 ; PCI ID 为事实数据；提取脚本见仓库 scripts 历史）。
-; 主要目标卡：HD 6490M (Seymour, 0x6840/0x6841) / HD 7470M (Caicos, 0x6779/0x677B)。
+; 主要目标卡：HD 6490M (Seymour XT/Caicos, 0x6768/0x6767/0x6766) /
+;              HD 7470M (Caicos XT, 0x6778，同门 0x6779/0x677B)。
+; （ID 依据 pciutils pci.ids 与 Linux 内核 drm_pciids.h 核对，2026-11-08；
+;   旧版注释误把 Barts/Thames 区段的 0x6840/0x6841 标成 6490M，已纠正。）
 ;
 ; 注意：骨架阶段（M2）对所有这些卡只做"识别与加载"，硬件能力按家族在
 ; M3+ 逐步落地（优先 Seymour/Caicos）。装卡前请用 gpu_probe.exe 核对实际 DEV ID。
@@ -18,7 +21,7 @@ Class       = DISPLAY
 ClassGuid   = {4d36e968-e325-11ce-bfc1-08002be10318}
 Provider    = %ManufacturerName%
 CatalogFile = rokmd.cat
-DriverVer   = 11/07/2026,0.1.0.0
+DriverVer   = 11/08/2026,0.1.1.0
 PnpLockdown = 1
 
 [DestinationDirs]
@@ -42,8 +45,12 @@ rokmd.sys = 1,,
 %rokmd_SimHyperV.DeviceDesc%     = rokmd_Install_Sim, PCI\VEN_1414&DEV_5353
 
 ; === 目标卡（主要验证对象）===
-%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6840
-%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6841
+; HD 6490M：Seymour XT = 0x6768；部分机型以 Caicos 形态（0x6766/0x6767）出现
+%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6768
+%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6767
+%rokmd_Seymour6490M.DeviceDesc% = rokmd_Install, PCI\VEN_1002&DEV_6766
+; HD 7470M：Caicos XT = 0x6778（0x6779/0x677B 为同门 Caicos 桌面/OEM 版）
+%rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_6778
 %rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_6779
 %rokmd_Caicos7470M.DeviceDesc%  = rokmd_Install, PCI\VEN_1002&DEV_677B
 
