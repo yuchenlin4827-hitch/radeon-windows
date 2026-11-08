@@ -269,16 +269,19 @@ static void RunPassSimulated(VOID)
                         TRUE, 0xFDE00000ULL, 0x10000);
     RokVdxgSetDriverKeyPath(driverKey);
 
-    // CCC（官方 Catalyst 体系）驱动键值 —— rokmd 专有名。
+    // CCC（官方 Catalyst 体系）驱动键值 —— rokmd 专有名；
+    // 另加 M3.1 的 sim 显存覆盖 Parameters\VramSizeMb=512（默认 256）。
     {
         ROK_MOCK_REG_VALUE seed[] = {
             { driverKey, L"Overdrive", 1 },
             { driverKey, L"OverdriveEngineClockKHz", 900000 },
             { driverKey, L"OverdriveMemoryClockKHz", 1150000 },
             { driverKey, L"OverdriveFanSpeedPercent", 60 },
+            { L"\\REGISTRY\\MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0001\\Parameters",
+              L"VramSizeMb", 512 },
         };
         int i;
-        for (i = 0; i < 4; i++) { rok_mock_registry[i] = seed[i]; }
+        for (i = 0; i < 5; i++) { rok_mock_registry[i] = seed[i]; }
     }
 
     poolBefore = RokMockPoolOutstanding();
@@ -609,6 +612,28 @@ static void RunPassSimulated(VOID)
             CHECK(ccc.Source == ROK_ESC_CCC_SOURCE_ESCAPE);
         }
 
+        // ---- M3.1 追加 escape 面：VRAM / SEGINFO（sim 覆盖值生效）----
+        {
+            ROK_ESC_VRAM_OUT vram;
+            ROK_ESC_SEGMENT_INFO_OUT segInfo;
+
+            stEsc = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_VRAM,
+                                   &vram, sizeof(vram));
+            CHECK(NT_SUCCESS(stEsc));
+            CHECK(vram.VramSizeBytes == 512ULL * 1024ULL * 1024ULL);
+            CHECK(vram.GartSizeBytes == 0);         // GTT 未落地（M3.2）
+            CHECK(vram.VramSegmentId == 0);         // 0 段模式
+
+            stEsc = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_SEGMENT_INFO,
+                                   &segInfo, sizeof(segInfo));
+            CHECK(NT_SUCCESS(stEsc));
+            CHECK(segInfo.VramSizeBytes == 512ULL * 1024ULL * 1024ULL);
+            CHECK(segInfo.GartSizeBytes == 0);
+            CHECK(segInfo.VramSegmentId == 0);
+            CHECK(segInfo.GartSegmentId == 0);
+            CHECK(segInfo.Flags == ROK_SEG_FLAG_VRAM_POPULATED);
+        }
+
         // ---- escape 负例 ----
         smallBuf[0] = 0;
         stEsc = RokEscape(c.hAdapter, ROK_ESC_TYPE_QUERY_VERSION, sizeof(ver),
@@ -818,6 +843,23 @@ static void RunPassRealHardware(VOID)
                             &sim, sizeof(sim));
         CHECK(NT_SUCCESS(st));
         CHECK(sim.PacketCount == 0);        // 真实硬件不解码
+    }
+
+    // M3.1 escape：真实形态 BAR0 内容全 0 → CONFIG_MEMSIZE=0 出界 →
+    // 不上报显存（诚实边界：探测值不满足阈值范围时宁可不报）。
+    {
+        ROK_ESC_VRAM_OUT vram;
+        ROK_ESC_SEGMENT_INFO_OUT segInfo;
+
+        st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_VRAM,
+                            &vram, sizeof(vram));
+        CHECK(NT_SUCCESS(st));
+        CHECK(vram.VramSizeBytes == 0);
+
+        st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_SEGMENT_INFO,
+                            &segInfo, sizeof(segInfo));
+        CHECK(NT_SUCCESS(st));
+        CHECK(segInfo.Flags == 0);          // 未 POPULATED
     }
 
     RokE2ETeardown(&c);

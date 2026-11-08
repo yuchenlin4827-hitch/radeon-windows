@@ -221,6 +221,9 @@ rokmd: sim decode — 3 pkts total, 1 INDIRECT_BUFFER (base 0x10000000, 512 dwor
 rokmd: SubmitCommandVirtual fence=77 → 78 → 79（QueryCurrentFence 全部回收）
 rokmd: ccc — set (mask=0xf engine=2000000KHz … fan=100)   ← 3GHz/150% 被钳制
 rokmd: QueryAdapterInfo NUMPOWERCOMPONENTS (0)           ← M2.8 追加面
+rokmd: VRAM (sim) = 536870912 bytes                       ← M3.1：VramSizeMb=512 覆盖
+  escape QUERY_VRAM    : Vram=512MB Gart=0 seg=0            ← M3.1 面
+  escape QUERY_SEGINFO : flags=VRAM_POPULATED               ← M3.1 面
 rokmd: LinkDevice (not supported — single adapter)
 rokmd: SetPowerComponentFState component=0 F=0 (no components)
 rokmd: PowerRuntimeControlRequest (runtime power not supported)
@@ -228,12 +231,14 @@ rokmd: SetPowerPState component=0 pstate=0 (not supported)
 ==== PASS B — real form: Caicos (1002:6779), no hypervisor ====
 rokmd: sim — real/unknown hardware (…), simulation off    ← SIM 位不亮
 rokmd: BAR0 MMIO mapped PA=0xfde00000 len=0x10000          ← 真实映射路径
-==== sim-device E2E: 161 checks, 0 failed ====  （ASan/UBSan 全程无告警）
+==== sim-device E2E: 175 checks, 0 failed ====  （ASan/UBSan 全程无告警）
 ```
 
-覆盖（161 项检查）：DDI 表完整性（94 成员，含 M2.8 追加的
+覆盖（175 项检查）：DDI 表完整性（94 成员，含 M2.8 追加的
 LinkDevice/SetPowerComponentFState/PowerRuntimeControlRequest/
-SetPowerPState/MPO v1 五成员点名）；sim 全管线（caps WDDMv2/
+SetPowerPState/MPO v1 五成员点名）；M3.1 escape 面（VRAM/SEGINFO：
+sim 覆盖值 Parameters\VramSizeMb=512MB 生效、GART 未落地恒 0、
+真实形态 BAR0 全 0 时宁可不报的诚实边界）；sim 全管线（caps WDDMv2/
 MultiEngineAware、0 段、进程/设备/分配/上下文生命周期、BuildPagingBuffer
 PM4 NOP 填充、三次提交 + fence 轮询回收、PM4 直方图逐槽核对含 0x47→槽
 0x07 折叠语义）；escape 契约（VERSION/PCI_ID/CAPS/SIM_STATUS/CCC_GET/

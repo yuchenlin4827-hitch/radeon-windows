@@ -280,6 +280,14 @@ void rok_kdprintf(ULONG Component, ULONG Level, PCSTR Fmt, ...);
 #define RtlFillMemory(d, l, f)  memset((d), (f), (l))
 #define RtlEqualMemory(a, b, l) (memcmp((a), (b), (l)) == 0)
 
+// ---- 寄存器访问原语（宿主 = volatile 解引用；真机 MMIO 语义由硬件保证）----
+#define READ_REGISTER_ULONG(reg)    (*(volatile ULONG *)(reg))
+#define WRITE_REGISTER_ULONG(reg,v) ((void)(*(volatile ULONG *)(reg) = (ULONG)(v)))
+#define READ_REGISTER_USHORT(reg)   (*(volatile USHORT *)(reg))
+#define WRITE_REGISTER_USHORT(reg,v)((void)(*(volatile USHORT *)(reg) = (USHORT)(v)))
+#define READ_REGISTER_UCHAR(reg)    (*(volatile UCHAR *)(reg))
+#define WRITE_REGISTER_UCHAR(reg,v) ((void)(*(volatile UCHAR *)(reg) = (UCHAR)(v)))
+
 // ---- 池分配（malloc 底座 + tag 记账，E2E 退出前核对平衡）----
 typedef enum _POOL_TYPE { NonPagedPool = 0, PagedPool = 1 } POOL_TYPE;
 PVOID ExAllocatePoolWithTag(POOL_TYPE PoolType, SIZE_T Size, ULONG Tag);
