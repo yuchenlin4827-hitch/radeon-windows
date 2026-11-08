@@ -132,6 +132,12 @@ vk_audit.exe            :: 全量报告
 vk_audit.exe --strict   :: 有缺口时返回非零退出码（CI 友好）
 ```
 
+> **v1.1**：入口解析改为规范写法——`vkGetInstanceProcAddr(NULL, …)` 按规范
+> 只解全局命令，实例级命令在实例创建成功后再解析（旧版在完全健康的
+> loader 上会误报 `global export missing: vkEnumeratePhysicalDevices`）。
+> `vkCreateInstance` 失败时额外输出诊断：实际加载的 DLL 路径、
+> `VK_DRIVER_FILES`/`VK_ICD_FILENAMES`、注册表 ICD 清单（64/32 位视图）。
+
 产物由 `build-umd.yml` 每次提交自动构建（Actions → Artifacts）；
 本地复现见 `tools/vk_audit/build-mingw.sh`。
 

@@ -1,2 +1,9 @@
-tests/umd/test_umd
+# 构建产物（CI 与本地构建生成，不入库）
+*.exe
+*.dll
 *.o
+*.obj
+*.pdb
+*.sys
+*.cer
+tests/umd/test_umd

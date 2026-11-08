@@ -11,6 +11,12 @@
 //   - 通过 LoadLibrary("vulkan-1.dll") + vkGetInstanceProcAddr 动态加载，
 //     只依赖官方 Vulkan-Headers 的 vulkan_core.h（构建脚本按需下载，
 //     pinned v1.4.330，Apache-2.0/MIT 双许可）；
+//   - v1.1 修正：按规范 vkGetInstanceProcAddr(NULL, ...) 只能解析全局命令
+//     （vkCreateInstance 等）；实例级命令先 GetProcAddress 探测 trampoline
+//     导出，实例创建成功后再用 gipa(instance, ...) 正式解析（官方
+//     Vulkan-Loader trampoline.c：instance==NULL 时非全局命令一律返回 NULL）；
+//   - vkCreateInstance 失败时输出诊断：实际加载的 DLL 路径、
+//     VK_DRIVER_FILES/VK_ICD_FILENAMES、注册表 ICD 清单（64/32 位视图）；
 //   - 特性/子群组/格式/limits 逐项填入 umd/vk13 与 umd/gl46 的门控模块，
 //     判定逻辑与单元测试完全同源；
 //   - 控制台输出用英文标签：避免 Windows 控制台代码页对 UTF-8 中文乱码
@@ -44,6 +50,96 @@ VKE(vkEnumerateDeviceExtensionProperties);
 VKE(vkGetPhysicalDeviceFormatProperties);
 #undef VKE
 
+/* 打印实际加载的 vulkan-1.dll 完整路径（DLL 搜索顺序：exe 所在目录优先，
+ * 本地目录里的旧/伪 loader 会在此显形）。 */
+static void print_loaded_loader_path(void)
+{
+    wchar_t path[MAX_PATH];
+    DWORD n = GetModuleFileNameW(g_vkdll, path, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        printf("  loader DLL  : %ls\n", path);
+    }
+}
+
+static const char *vk_result_str(VkResult vr)
+{
+    switch (vr) {
+    case VK_SUCCESS:                   return "VK_SUCCESS";
+    case VK_ERROR_OUT_OF_HOST_MEMORY:  return "VK_ERROR_OUT_OF_HOST_MEMORY";
+    case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+    case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+    case VK_ERROR_DEVICE_LOST:         return "VK_ERROR_DEVICE_LOST";
+    case VK_ERROR_LAYER_NOT_PRESENT:   return "VK_ERROR_LAYER_NOT_PRESENT";
+    case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+    case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
+    case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+    case VK_ERROR_TOO_MANY_OBJECTS:    return "VK_ERROR_TOO_MANY_OBJECTS";
+    case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+    case VK_ERROR_UNKNOWN:             return "VK_ERROR_UNKNOWN";
+    default:                           return "(other VkResult)";
+    }
+}
+
+/* 枚举 HKLM\SOFTWARE\Khronos\Vulkan\Drivers 的 64/32 位视图。
+ * 每个值的名字就是一份 ICD manifest JSON 的完整路径。 */
+static void print_icd_registry(void)
+{
+    static const struct {
+        REGSAM access;
+        const char *label;
+    } views[] = {
+        { KEY_WOW64_64KEY, "64-bit view" },
+        { KEY_WOW64_32KEY, "32-bit view" },
+    };
+    size_t v;
+    int total = 0;
+    const char *env = getenv("VK_DRIVER_FILES");
+
+    if (env == NULL) {
+        env = getenv("VK_ICD_FILENAMES");
+    }
+    printf("  VK_DRIVER_FILES / VK_ICD_FILENAMES: %s\n",
+           env ? env : "(not set)");
+
+    for (v = 0; v < sizeof(views) / sizeof(views[0]); v++) {
+        HKEY k;
+        LONG rc = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                                "SOFTWARE\\Khronos\\Vulkan\\Drivers", 0,
+                                KEY_READ | views[v].access, &k);
+        printf("  registry ICDs (%s):\n", views[v].label);
+        if (rc != ERROR_SUCCESS) {
+            printf("    (key not present)\n");
+            continue;
+        }
+        {
+            DWORD idx = 0;
+            char name[1024];
+            DWORD name_len;
+            for (;;) {
+                name_len = (DWORD)sizeof(name);
+                rc = RegEnumValueA(k, idx, name, &name_len, NULL, NULL,
+                                   NULL, NULL);
+                if (rc != ERROR_SUCCESS) {
+                    break;
+                }
+                printf("    [%lu] %s\n", (unsigned long)idx, name);
+                total++;
+                idx++;
+            }
+            if (idx == 0) {
+                printf("    (no ICD manifest values)\n");
+            }
+        }
+        RegCloseKey(k);
+    }
+    if (total == 0) {
+        printf("  -> no Vulkan ICD registered at all.\n");
+        printf("     Expected on TeraScale (HD 2000-7000) with legacy Catalyst:\n"
+               "     AMD never shipped a Vulkan ICD for these GPUs.\n");
+        printf("     That is exactly what M1/M4 (terakan ICD) will provide.\n");
+    }
+}
+
 static int load_vulkan_loader(void)
 {
     g_vkdll = LoadLibraryW(L"vulkan-1.dll");
@@ -52,28 +148,42 @@ static int load_vulkan_loader(void)
         printf("  Install the Vulkan runtime (or terakan ICD + loader).\n");
         return 0;
     }
+    print_loaded_loader_path();
+
     g_vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)(void *)
         GetProcAddress(g_vkdll, "vkGetInstanceProcAddr");
     if (g_vkGetInstanceProcAddr == NULL) {
         printf("  vkGetInstanceProcAddr missing in vulkan-1.dll\n");
         return 0;
     }
-#define GET(name)                                                          \
-    g_pfn_##name = (PFN_##name)(void *)g_vkGetInstanceProcAddr(            \
-        VK_NULL_HANDLE, #name);                                            \
-    if (g_pfn_##name == NULL) {                                            \
-        printf("  global export missing: %s\n", #name);                    \
-        return 0;                                                          \
+
+    /* 全局命令（无分发对象）：规范允许 gipa(NULL, ...) 解析。 */
+    g_pfn_vkCreateInstance = (PFN_vkCreateInstance)(void *)
+        g_vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance");
+    if (g_pfn_vkCreateInstance == NULL) {
+        printf("  global export missing: vkCreateInstance\n");
+        return 0;
     }
-    GET(vkCreateInstance);
-    GET(vkEnumeratePhysicalDevices);
-    GET(vkGetPhysicalDeviceProperties);
-    GET(vkGetPhysicalDeviceFeatures);
-    GET(vkEnumerateDeviceExtensionProperties);
-    GET(vkGetPhysicalDeviceFormatProperties);
-#undef GET
-    /* vkGetPhysicalDevice{Properties2,Features2} 需要实例句柄才能解析，
-     * 在 main() 中做；1.0 ICD 下可能为 NULL（属正常降级）。 */
+
+    /* 实例级核心命令：规范规定 gipa(NULL, ...) 必须返回 NULL，
+     * 这里只探测 loader 的 trampoline 导出是否存在；真正可用
+     * 的函数指针在实例创建成功后用 gipa(instance, ...) 解析。 */
+#define CHK(name)                                                          \
+    do {                                                                   \
+        if (GetProcAddress(g_vkdll, #name) == NULL) {                      \
+            printf("  export missing: %s\n", #name);                       \
+            return 0;                                                      \
+        }                                                                  \
+    } while (0)
+    CHK(vkEnumeratePhysicalDevices);
+    CHK(vkGetPhysicalDeviceProperties);
+    CHK(vkGetPhysicalDeviceFeatures);
+    CHK(vkEnumerateDeviceExtensionProperties);
+    CHK(vkGetPhysicalDeviceFormatProperties);
+#undef CHK
+    /* vkGetPhysicalDevice{Properties2,Features2} 为 1.1+ 扩展命令，
+     * 可能不在老 loader 的导出表里；在 main() 中按实例解析，
+     * 1.0 ICD 下为 NULL（属正常降级）。 */
     return 1;
 }
 
@@ -616,8 +726,8 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("vk_audit - radeon-windows M5.5 (Vulkan 1.3) / M7 (OpenGL 4.6) audit\n");
-    printf("====================================================================\n");
+    printf("vk_audit v1.1 - radeon-windows M5.5 (Vulkan 1.3) / M7 (OpenGL 4.6) audit\n");
+    printf("==========================================================================\n");
 
     if (!load_vulkan_loader()) {
         return 3;
@@ -636,14 +746,26 @@ int main(int argc, char **argv)
 
     vr = g_pfn_vkCreateInstance(&ci, NULL, &instance);
     if (vr != VK_SUCCESS) {
-        printf("  vkCreateInstance failed, VkResult=%d\n", (int)vr);
+        printf("  vkCreateInstance failed, VkResult=%d (%s)\n",
+               (int)vr, vk_result_str(vr));
+        if (vr == VK_ERROR_INCOMPATIBLE_DRIVER) {
+            printf("  -> loader works but no usable ICD is registered.\n");
+        }
+        print_icd_registry();
         return 3;
     }
 
-    g_pfn_vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)
-        (void *)g_vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties2");
-    g_pfn_vkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)
-        (void *)g_vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2");
+    /* 实例级命令：实例创建后经 gipa(instance, ...) 正式解析（规范路径）。 */
+#define RES(name)                                                          \
+    g_pfn_##name = (PFN_##name)(void *)g_vkGetInstanceProcAddr(instance, #name)
+    RES(vkEnumeratePhysicalDevices);
+    RES(vkGetPhysicalDeviceProperties);
+    RES(vkGetPhysicalDeviceFeatures);
+    RES(vkEnumerateDeviceExtensionProperties);
+    RES(vkGetPhysicalDeviceFormatProperties);
+    RES(vkGetPhysicalDeviceProperties2);
+    RES(vkGetPhysicalDeviceFeatures2);
+#undef RES
 
     ndev = 0;
     vr = g_pfn_vkEnumeratePhysicalDevices(instance, &ndev, NULL);

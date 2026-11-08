@@ -33,26 +33,37 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Driver</ConfigurationType>
+    <!-- 用标准 DynamicLibrary 管线 + 手动内核链接参数（见下 ItemDefinitionGroup）。
+         原因：CI（无 WDK VSIX）下 ConfigurationType=Driver 的管线只编译不链接，
+         构建退出码仍为 0（假绿），永远产不出 rokmd.sys；
+         DynamicLibrary + Native/GsDriverEntry 等价于 WDM 驱动的链接形态，产物即 rokmd.sys -->
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>WindowsApplicationForDrivers10.0</PlatformToolset>
     <DriverType>WDM</DriverType>
     <TargetVersion>WINDOWS10</TargetVersion>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <TargetExt>.sys</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Driver</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>WindowsApplicationForDrivers10.0</PlatformToolset>
     <DriverType>WDM</DriverType>
     <TargetVersion>WINDOWS10</TargetVersion>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <TargetExt>.sys</TargetExt>
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <!-- 关键：TargetExt 必须在 Microsoft.Cpp.props 导入之后设置才能生效
+         （Cpp.props 会把 DynamicLibrary 的默认 .dll 无条件覆盖进来）；
+         放在 Configuration 组里会在导入时被清掉，产物变成 rokmd.dll -->
+    <TargetExt>.sys</TargetExt>
+  </PropertyGroup>
 
   <ItemDefinitionGroup>
     <ClCompile>
@@ -60,6 +71,9 @@
       <TreatWarningAsError>false</TreatWarningAsError>
       <!-- 源码含中文注释，强制 UTF-8 编译，避免代码页告警 -->
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 内核模块无 CRT：关闭 /RTC（Debug 默认开启，会引用 _RTC_* 符号） -->
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>NTDDI_VERSION=NTDDI_WIN10;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!--
         WDK NuGet 布局下的显式 include 路径（工具链自动组装在 CI 上不可靠）：
@@ -72,7 +86,21 @@
     </ClCompile>
     <Link>
       <TreatLinkerWarningAsErrors>false</TreatLinkerWarningAsErrors>
-      <AdditionalLibraryDirectories>$(WDKContentRoot)Lib\10.0.26100.0\km\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <!-- 内核库（ntoskrnl/hal/BufferOverflowK）与 SDK 用户库（uuid，GUID 实例化） -->
+      <AdditionalLibraryDirectories>$(WDKContentRoot)Lib\10.0.26100.0\km\x64;$(RokSdkX64ContentRoot)um\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <!-- WDM 内核驱动链接形态（等价于 WDK Driver 管线的默认值）：
+           Native 子系统、/DRIVER 形态、GsDriverEntry（BufferOverflowK 提供）、
+           displib.lib 提供 DxgkInitialize -->
+      <SubSystem>Native</SubSystem>
+      <GenerateManifest>false</GenerateManifest>
+      <EmbedManifest>false</EmbedManifest>
+      <TargetCulture>0</TargetCulture>
+      <EntryPointSymbol>GsDriverEntry</EntryPointSymbol>
+      <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <AdditionalDependencies>displib.lib;ntoskrnl.lib;hal.lib;BufferOverflowK.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- 双保险：直接指定链接输出文件名，不依赖 TargetExt 的求值顺序 -->
+      <OutputFile>$(OutDir)$(TargetName).sys</OutputFile>
+      <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Inf>
       <TreatWarningAsError>false</TreatWarningAsError>
