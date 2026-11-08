@@ -48,7 +48,7 @@ INF 覆盖 **AMD TeraScale 全家族 306 个设备 ID**（提取自 Linux 内核
 | Vulkan 1.3 | ⚠️ M5.5 目标（24 项核心特性差距） | 逐项计划见 docs/vulkan13-plan.md |
 | OpenGL 4.6 | ✅ **R600g 原生移植**（Mesa 25.2 起 r600/evergreen+ 完成） | 主路线；Zink（需 Vulkan 1.3）为备选 |
 | DX12 | ❌ 官方当年也只到 DX11 | 开源路径需 Vulkan 1.3 基座（vkd3d-proton 式转换层） |
-| WDDM 2.0 KMD | ❌ 缺失 ← **本项目核心攻坚点** | Linux radeon KMD 逻辑 → DXGK DDI 移植 |
+| WDDM 2.0 KMD | 🚧 骨架已就位 ← **本项目核心攻坚点** | DDI 表完整（M2.6）；硬件能力 M3 移植 |
 
 结论：**Vulkan 1.0 已打通、GL 4.6 主路线已锁定（R600g）**；WDDM 2.0 KMD 是
 最大的缺口；Vulkan 1.3 与 DX12 按 M5.5/M6 推进。
@@ -64,12 +64,16 @@ radeon-windows/
 │   ├── r600g-gl46.md          # GL 4.6：R600g 主路线 + Zink 备选
 │   ├── api-matrix.md          # API × GPU 代际 兼容矩阵（含来源）
 │   ├── wddm-vulkan-limits.md  # WDDM / Vulkan 版本上限调研
+│   ├── simulated-device.md    # 模拟设备 VM 运行手册（QEMU ati-vga 等）
+│   ├── ccc.md                 # 官方 CCC 设置兼容（值名映射 / ADL shim）
 │   ├── research/terakan.md    # terakan 调研笔记
 │   └── licensing.md           # MIT / GPL-2.0 许可证分析
-├── kmd/                       # 自研 WDDM 2.0 显示微型端口（KMD）骨架
+├── kmd/                       # 自研 WDDM 2.0 显示微型端口（KMD）
 │   ├── rokmd.vcxproj          #   VS2022 + WDK NuGet 工程
-│   ├── rokmd.inf              #   安装 INF（TeraScale 全家族 306 设备）
-│   └── src/                   #   DriverEntry + DXGK DDI 骨架
+│   ├── rokmd.inf              #   安装 INF（TeraScale 306 设备 + 模拟设备段）
+│   └── src/                   #   DriverEntry + DXGK DDI
+│       ├── sim.c              #   模拟设备后端（VM 里跑通管线，PM4 解码前哨）
+│       └── ccc.c              #   CCC 设置兼容层（注册表导入 + escape get/set）
 ├── umd/
 │   ├── README.md              # 用户态驱动计划（terakan 集成 + 门控模块）
 │   ├── vk13/                  # Vulkan 1.3 门控：promoted 表 + 必选特性 + 层级判定
@@ -145,7 +149,8 @@ vk_audit.exe --strict   :: 有缺口时返回非零退出码（CI 友好）
 | M6 | DX12 层评估（受 Vulkan 1.3 前置约束） | ⬜ |
 | M7 | R600g 原生移植 → OpenGL 4.6（Zink 备选） | ⬜ 门控代码已交付 |
 
-完整定义见 [docs/roadmap.md](docs/roadmap.md)。
+完整定义见 [docs/roadmap.md](docs/roadmap.md)；下一批可支持目标的评估见
+[docs/api-matrix.md](docs/api-matrix.md) 第 5 节。
 
 ## 许可证
 

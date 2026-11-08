@@ -173,6 +173,7 @@ RokDdiStartDevice(
     PROK_ADAPTER adapter = (PROK_ADAPTER)MiniportDeviceContext;
     DXGK_DEVICE_INFO deviceInfo;
     NTSTATUS status;
+    BOOLEAN haveDeviceInfo = FALSE;
 
     PAGED_CODE();
 
@@ -206,6 +207,7 @@ RokDdiStartDevice(
                                                        &deviceInfo);
     if (NT_SUCCESS(status))
     {
+        haveDeviceInfo = TRUE;
         adapter->PhysicalDeviceObject = deviceInfo.PhysicalDeviceObject;
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
                    "rokmd: StartDevice PDO %p, registry %wZ\n",
@@ -222,7 +224,21 @@ RokDdiStartDevice(
     // PCI 标识 + BAR0 映射。M2 不因 BAR0 缺失而拒绝启动
     //（虚拟机/桥接设备形态不同），M3 引入寄存器访问时再收紧。
     RokAdapterReadPciIds(adapter);
-    if (!NT_SUCCESS(RokAdapterMapMmio(adapter, deviceInfo.TranslatedResourceList)))
+
+    // 模拟设备判定（M2.6，sim.c）：设备 ID / 注册表开关 / hypervisor 自动。
+    // 命中则分配模拟寄存器空间，真实 BAR0 缺失降级为提示而非告警。
+    RokSimInitialize(adapter, haveDeviceInfo ? &deviceInfo.DeviceRegistryPath : NULL);
+
+    // CCC 设置导入（M2.6，ccc.c）：Catalyst 遗留值名 + rokmd 专有值名。
+    RokCccImport(adapter, haveDeviceInfo ? &deviceInfo.DeviceRegistryPath : NULL);
+
+    if (adapter->SimulationMode)
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: sim register space %p (%lu bytes) active — real BAR0 map skipped\n",
+                   adapter->SimRegisterSpace, adapter->SimRegisterSpaceSize));
+    }
+    else if (!NT_SUCCESS(RokAdapterMapMmio(adapter, deviceInfo.TranslatedResourceList)))
     {
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
                    "rokmd: BAR0 unmapped — continue in pure render-only mode\n"));
@@ -253,6 +269,8 @@ RokDdiStopDevice(
                 adapter->MmioVirtualAddress);
             adapter->MmioVirtualAddress = NULL;
         }
+        // 模拟寄存器空间一并释放（真实模式是空操作）。
+        RokSimShutdown(adapter);
         adapter->Started = FALSE;
     }
 
@@ -276,6 +294,8 @@ RokDdiRemoveDevice(
         // 回收；此处防御性断言链表为空。
         ASSERT(IsListEmpty(&adapter->AllocationList));
         ASSERT(IsListEmpty(&adapter->ContextList));
+        // 防御：StopDevice 未触达（异常路径）时释放模拟寄存器空间。
+        RokSimShutdown(adapter);
         ExFreePoolWithTag(adapter, ROK_POOL_TAG);
     }
     return STATUS_SUCCESS;

@@ -1,0 +1,47 @@
+# rok_adl.dll（ADL 兼容 shim）CI：mingw 交叉编译 + Windows MSVC 编译双验证
+# 产物 rok_adl.dll + adl_smoke.exe；同时验证 DLL 导出可被链接。
+name: build-adl
+
+on:
+  push:
+    paths:
+      - 'umd/adl/**'
+      - 'tests/adl_smoke/**'
+      - '.github/workflows/build-adl.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mingw-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Build rok_adl.dll + adl_smoke.exe
+        run: bash tests/adl_smoke/build-mingw.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rok_adl-mingw-x64
+          path: |
+            tests/adl_smoke/rok_adl.dll
+            tests/adl_smoke/adl_smoke.exe
+
+  msvc-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build rok_adl.dll (cl /LD) + adl_smoke.exe
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /O2 /W4 /utf-8 /LD /Fe:rok_adl.dll umd\adl\rok_adl.c
+          cl /nologo /O2 /W4 /utf-8 /Iumd\adl /Fe:adl-smoke-msvc.exe tests\adl_smoke\adl_smoke.c /link rok_adl.lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rok_adl-msvc-x64
+          path: |
+            rok_adl.dll
+            rok_adl.lib
+            adl-smoke-msvc.exe

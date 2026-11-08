@@ -40,7 +40,7 @@ typedef uint64_t ROK_U64;
 // 协议版本：v1 = 查询面。M3/M4 追加提交类接口时升 v2 并保留 v1 查询。
 #define ROK_ESCAPE_VERSION      1UL
 
-// Escape 类型。
+// Escape 类型（v1 查询面；M2.6 追加 SIM/CCC 为 6/7/8，向后兼容）。
 typedef enum _ROK_ESCAPE_TYPE
 {
     ROK_ESC_TYPE_QUERY_VERSION   = 1,    // -> ROK_ESC_VERSION_OUT
@@ -48,11 +48,15 @@ typedef enum _ROK_ESCAPE_TYPE
     ROK_ESC_TYPE_QUERY_VRAM      = 3,    // -> ROK_ESC_VRAM_OUT（M3 前全 0）
     ROK_ESC_TYPE_QUERY_CAPS      = 4,    // -> ROK_ESC_CAPS_OUT
     ROK_ESC_TYPE_QUERY_SEGMENT_INFO = 5, // -> ROK_ESC_SEGMENT_INFO_OUT（M3 前全 0）
+    ROK_ESC_TYPE_QUERY_SIM_STATUS = 6,   // -> ROK_ESC_SIM_STATUS_OUT（M2.6，sim.c）
+    ROK_ESC_TYPE_CCC_GET_SETTINGS = 7,   // -> ROK_ESC_CCC_SETTINGS（M2.6，ccc.c）
+    ROK_ESC_TYPE_CCC_SET_SETTINGS = 8,   // <- ROK_ESC_CCC_SETTINGS（M2.6，输入报文）
 } ROK_ESCAPE_TYPE;
 
 // 能力位（ROK_ESC_CAPS_OUT.CapsMask）。
 #define ROK_CAP_MMIO_MAPPED         0x00000001UL  // BAR0 已映射（StartDevice 成功）
 #define ROK_CAP_PCI_ID_VALID        0x00000002UL  // PCI 标识已读取
+#define ROK_CAP_SIM_DEVICE          0x00000004UL  // M2.6：模拟设备模式（sim.c）
 #define ROK_CAP_PM4_SUBMIT          0x00000100UL  // M3：ring 提交可用
 #define ROK_CAP_IH_INTERRUPT        0x00000200UL  // M3：IH 中断可用
 #define ROK_CAP_VRAM_SEGMENT        0x00000400UL  // M3：VRAM 段可用
@@ -117,6 +121,47 @@ typedef struct _ROK_ESC_SEGMENT_INFO_OUT
     ROK_U32 Reserved;
 } ROK_ESC_SEGMENT_INFO_OUT, *PROK_ESC_SEGMENT_INFO_OUT;
 
+// ---- 模拟设备状态（M2.6，sim.c；escape 查询 6 回传给 gpu_probe/ICD）----
+// 结构必须 POD 且稳定：字段增删只能追加，两侧 C_ASSERT 防漂移。
+typedef struct _ROK_ESC_SIM_STATUS_OUT
+{
+    ROK_U32 Enabled;             // 1 = 模拟模式（sim.c 判定命中）
+    ROK_U32 HypervisorPresent;   // CPUID leaf 1 ECX bit31
+    ROK_U32 RegisterSpaceSize;   // 模拟寄存器空间字节数（64KB）
+    ROK_U32 PacketCount;         // type-3 包总数（累计）
+    ROK_U32 Type2Count;          // type-2 filler 个数
+    ROK_U32 Type0Count;          // type-0 寄存器写包个数
+    ROK_U32 UnknownOpcodes;      // 未识别 opcode 个数
+    ROK_U32 LastIndirectBaseLo;  // 最近 INDIRECT_BUFFER 基址低 32 位
+    ROK_U32 LastIndirectSizeDwords;
+    ROK_U32 LastFenceSubmitted;
+    ROK_U32 OpcodeCounts[64];    // type-3 opcode 直方图（opcode & 0x3F）
+} ROK_ESC_SIM_STATUS_OUT, *PROK_ESC_SIM_STATUS_OUT;
+
+// ---- CCC 设置块（M2.6，ccc.c；escape get=7 / set=8 报文体）----
+// 语义与 kmd/src/ccc.h 的 ROK_CCC_SETTINGS 一致（同一份定义镜像，
+// 保持契约头自包含）；CCC 值名映射与钳制规则见 docs/ccc.md。
+#define ROK_ESC_CCC_VERSION                 1
+#define ROK_ESC_CCC_VALID_ENGINE_CLOCK      0x00000001UL
+#define ROK_ESC_CCC_VALID_MEMORY_CLOCK      0x00000002UL
+#define ROK_ESC_CCC_VALID_OD_ENABLE         0x00000004UL
+#define ROK_ESC_CCC_VALID_FAN_SPEED         0x00000008UL
+#define ROK_ESC_CCC_SOURCE_NONE             0
+#define ROK_ESC_CCC_SOURCE_REGISTRY         1
+#define ROK_ESC_CCC_SOURCE_ESCAPE           2
+
+typedef struct _ROK_ESC_CCC_SETTINGS
+{
+    ROK_U32 Version;            // ROK_ESC_CCC_VERSION
+    ROK_U32 ValidMask;          // ROK_ESC_CCC_VALID_* 组合
+    ROK_U32 EngineClockKHz;     // 引擎时钟覆盖（0 = 未覆盖）
+    ROK_U32 MemoryClockKHz;     // 显存时钟覆盖（0 = 未覆盖）
+    ROK_U32 OverdriveEnable;    // 1 = Overdrive 手动档
+    ROK_U32 FanSpeedPercent;    // 0..100
+    ROK_U32 Source;             // ROK_ESC_CCC_SOURCE_*
+    ROK_U32 Reserved;           // 0
+} ROK_ESC_CCC_SETTINGS, *PROK_ESC_CCC_SETTINGS;
+
 #if defined(_WIN32)
 C_ASSERT(sizeof(ROK_ESCAPE_HEADER) == 16);
 C_ASSERT(sizeof(ROK_ESC_VERSION_OUT) == 16);
@@ -124,6 +169,8 @@ C_ASSERT(sizeof(ROK_ESC_PCI_ID_OUT) == 16);
 C_ASSERT(sizeof(ROK_ESC_VRAM_OUT) == 24);
 C_ASSERT(sizeof(ROK_ESC_CAPS_OUT) == 16);
 C_ASSERT(sizeof(ROK_ESC_SEGMENT_INFO_OUT) == 32);
+C_ASSERT(sizeof(ROK_ESC_SIM_STATUS_OUT) == 296);
+C_ASSERT(sizeof(ROK_ESC_CCC_SETTINGS) == 32);
 #endif
 
 // TeraScale 家族启发式（M3 用完整分发表替换）。

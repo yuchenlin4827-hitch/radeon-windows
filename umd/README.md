@@ -5,8 +5,12 @@
 1. **terakan 的 CI 构建与打包**（M1）
    - 源：`https://gitlab.freedesktop.org/Triang3l/mesa`（terakan 子树）
    - 产物：`terakan_icd.dll` + `terakan_icd.x86_64.json`（Vulkan ICD 清单）
-   - 安装：JSON 放入 `%SYSTEMROOT%\System32\`（或设置环境变量
-     `VK_ICD_FILENAMES` 指向该 JSON），Loader 即可枚举。
+   - 安装：`install-terakan.ps1`（复制 DLL、写 ICD JSON、注册到
+     `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` —— Vulkan loader 的 Windows
+     ICD 发现机制），或临时设置环境变量
+     `VK_ICD_FILENAMES=<json 路径>` 直接测试；
+   - 验证：`tests/vk_smoke/vk_smoke.exe`（端到端 compute，PASS = 全链路
+     打通）→ `vkcube`（M1 验收门）。
    - 调研与依赖边界结论见 [../docs/research/terakan.md](../docs/research/terakan.md)
 
 2. **M4：terakan winsys → 自研 rokmd 对接层**

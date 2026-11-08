@@ -23,6 +23,8 @@
 #include "adapter.h"
 #include "ddi.h"
 #include "rok_escape.h"
+#include "sim.h"
+#include "ccc.h"
 
 // 每次提交随 DMA buffer 传递的私有数据（ContextInfo.DmaBufferPrivateDataSize）。
 typedef struct _ROK_SUBMIT_PRIV
@@ -736,6 +738,9 @@ RokDdiSubmitCommand(
     InterlockedExchange(&adapter->LastCompletedFenceId,
                         (LONG)pSubmitCommand->SubmissionFenceId);
 
+    // 模拟设备（sim.c）：记录观察到的最近 fence（真实模式为簿记空操作）。
+    adapter->SimStats.LastFenceSubmitted = (UINT32)pSubmitCommand->SubmissionFenceId;
+
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL,
                "rokmd: SubmitCommand fence=%u ctx=%p size=%u\n",
                pSubmitCommand->SubmissionFenceId,
@@ -763,6 +768,11 @@ RokDdiSubmitCommandVirtual(
     // M4 的 terakan ICD 命令流将走本通道；当前同样即时完成。
     InterlockedExchange(&adapter->LastCompletedFenceId,
                         (LONG)pSubmitCommand->SubmissionFenceId);
+
+    // 模拟设备（sim.c）：PM4 解码统计（真实模式为空操作）。
+    adapter->SimStats.LastFenceSubmitted = (UINT32)pSubmitCommand->SubmissionFenceId;
+    RokSimObserveDma(adapter, pSubmitCommand->DmaBufferVirtualAddress,
+                     pSubmitCommand->DmaBufferSize);
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL,
                "rokmd: SubmitCommandVirtual fence=%u ctx=%p va=%I64x size=%u\n",
@@ -1047,6 +1057,10 @@ RokDdiEscape(
         {
             out->CapsMask |= ROK_CAP_MMIO_MAPPED;
         }
+        if (RokSimEnabled(adapter))
+        {
+            out->CapsMask |= ROK_CAP_SIM_DEVICE;   // M2.6：模拟设备（sim.c）
+        }
         out->Pm4PacketVersion = 3;   // TeraScale type-3 PM4
         out->Reserved[0] = 0;
         out->Reserved[1] = 0;
@@ -1071,6 +1085,85 @@ RokDdiEscape(
         out->Flags = 0;
         out->Reserved = 0;
         return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_QUERY_SIM_STATUS:        // M2.6（sim.c）
+    {
+        PROK_ESC_SIM_STATUS_OUT out;
+        CONST PROK_SIM_STATS st = &adapter->SimStats;
+        ULONG slot;
+
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_SIM_STATUS_OUT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_SIM_STATUS_OUT)(header + 1);
+        out->Enabled = RokSimEnabled(adapter) ? 1 : 0;
+        out->HypervisorPresent = adapter->HypervisorPresent ? 1 : 0;
+        out->RegisterSpaceSize = adapter->SimRegisterSpaceSize;
+        out->PacketCount = st->PacketCount;
+        out->Type2Count = st->Type2Count;
+        out->Type0Count = st->Type0Count;
+        out->UnknownOpcodes = st->UnknownOpcodes;
+        out->LastIndirectBaseLo = st->LastIndirectBaseLo;
+        out->LastIndirectSizeDwords = st->LastIndirectSizeDwords;
+        out->LastFenceSubmitted = st->LastFenceSubmitted;
+        for (slot = 0; slot < 64; slot++)
+        {
+            out->OpcodeCounts[slot] = st->OpcodeCounts[slot];
+        }
+        return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_CCC_GET_SETTINGS:        // M2.6（ccc.c）
+    {
+        PROK_ESC_CCC_SETTINGS out;
+        ROK_CCC_SETTINGS cur;
+        NTSTATUS escStatus;
+
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_CCC_SETTINGS))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_CCC_SETTINGS)(header + 1);
+        escStatus = RokCccGetSettings(adapter, &cur);
+        if (!NT_SUCCESS(escStatus))
+        {
+            return escStatus;
+        }
+        out->Version = cur.Version;
+        out->ValidMask = cur.ValidMask;
+        out->EngineClockKHz = cur.EngineClockKHz;
+        out->MemoryClockKHz = cur.MemoryClockKHz;
+        out->OverdriveEnable = cur.OverdriveEnable;
+        out->FanSpeedPercent = cur.FanSpeedPercent;
+        out->Source = cur.Source;
+        out->Reserved = 0;
+        return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_CCC_SET_SETTINGS:        // M2.6（ccc.c，输入报文）
+    {
+        PROK_ESC_CCC_SETTINGS in;
+        ROK_CCC_SETTINGS inKernel;
+
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_CCC_SETTINGS))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        in = (PROK_ESC_CCC_SETTINGS)(header + 1);
+        inKernel.Version = in->Version;
+        inKernel.ValidMask = in->ValidMask;
+        inKernel.EngineClockKHz = in->EngineClockKHz;
+        inKernel.MemoryClockKHz = in->MemoryClockKHz;
+        inKernel.OverdriveEnable = in->OverdriveEnable;
+        inKernel.FanSpeedPercent = in->FanSpeedPercent;
+        inKernel.Source = in->Source;
+        inKernel.Reserved = in->Reserved;
+        return RokCccSetSettings(adapter, &inKernel);
     }
 
     default:

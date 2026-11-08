@@ -70,3 +70,36 @@
   <https://www.x.org/wiki/RadeonFeature/> 与内核源码 `drivers/gpu/drm/radeon`
 - GPUOpen（AMD 开发者站，ISA/固件资料）:
   <https://gpuopen.com/>
+
+## 5. 还能支持什么（下一批扩展目标的诚实评估）
+
+> 2026-11 评估，与 roadmap M4–M6 对应。原则：**每一项都指明前置条件**，
+> 不做无依据的承诺。
+
+### 5.1 短期可行（M4/M5 顺位）
+
+| 目标 | 前置条件 | 依据 |
+| --- | --- | --- |
+| **Vulkan 1.1**（terakan） | terakan 补 1.1 必须特性：subgroup ops（VLIW 用 DSP 式软件模拟）、host query reset、device groups 可跳过 | Khronos 1.1 diff 规范；terakan 已有 1.0 全量 |
+| **OpenGL 4.5**（Zink on terakan 1.1） | Vulkan 1.1 ✅ → Zink（Mesa，Windows 可编） | Zink 4.5 要求 Vulkan 1.1（features.txt） |
+| **DX9**（DXVK 旧线 / WineD3D native） | Vulkan 1.1（dxvk-d9vk 线）或 GL 4.3+（wined3d GL 后端） | DXVK 1.x d3d9 最低 Vulkan 1.1；WineD3D 可运行于原生 Windows |
+| **模拟设备全链路 CI** | ✅ M2.6 已落地（sim.c）——把 VM 冒烟固化为 Actions job | docs/simulated-device.md |
+
+### 5.2 中期评估（M6，条件性）
+
+| 目标 | 前置条件 | 现实判断 |
+| --- | --- | --- |
+| **DX10/11**（DXVK 2.x） | **Vulkan 1.3**（DXVK 2.x 硬要求：dynamic rendering、1.3 特性组） | terakan 上 1.3 的 feature gap 大（动态渲染/8 位存储等）；按 vkd3d-proton 同款路线评估，不承诺 |
+| **DX12**（vkd3d-proton 式） | Vulkan 1.3 + 大量可选特性 | 同上，且官方当年对 TeraScale 本来就止步 DX11 |
+| **GL 4.6** | Vulkan 1.3 基座的 Zink | 长线 |
+
+### 5.3 明确不做（说明理由）
+
+| 目标 | 理由 |
+| --- | --- |
+| **OpenCL 1.x** | Linux 路线是 Mesa clover，clover 不支持 Windows 构建；Windows 侧无现实开源路径 |
+| **VA-API / VDPAU** | Linux-only API；Windows 等价物是 DXVA/DDDI（UVD 视频解码 DDI），TeraScale 的 UVD2/3 可做但优先级远低于渲染主链 |
+| **WDDM 2.1+ 升级** | 2.1–2.7 的新特性（HAGS/HwSch、GpuMmu 强制等）对 VLIW 无收益且抬升 DDI 移植成本；锁定 2.0 基线已是决策（见 wddm-vulkan-limits.md） |
+| **CCC 本体驱动 rokmd** | CCC UI 绑死 atikmdag 私有通道；rokmd 走"设置兼容"路线（docs/ccc.md），不伪造私有 DDI |
+| **官方 ADL 完整 ABI 对拍** | 需真实卡实机抓包 atiadlxx 行为；当前交付语义等价面（umd/adl/README.md 差异表） |
+

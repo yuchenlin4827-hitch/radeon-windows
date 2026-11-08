@@ -12,6 +12,8 @@
 #pragma once
 
 #include "precomp.h"
+#include "sim.h"    // ROK_SIM_STATS（模拟设备统计，sim.c 实现）
+#include "ccc.h"    // ROK_CCC_SETTINGS（CCC 兼容设置，ccc.c 实现）
 
 typedef struct _ROK_ADAPTER {
     // ---- VidMm / 上下文簿记 ----
@@ -39,6 +41,16 @@ typedef struct _ROK_ADAPTER {
 
     // ---- 命令进度 ----
     volatile LONG   LastCompletedFenceId;
+
+    // ---- 模拟设备（sim.c，M2.6）----
+    BOOLEAN         SimulationMode;         // 自动/注册表/设备 ID 三路判定
+    BOOLEAN         HypervisorPresent;      // CPUID 探测结果
+    PVOID           SimRegisterSpace;       // 64KB 模拟 MMIO（NonPagedPool）
+    ULONG           SimRegisterSpaceSize;
+    ROK_SIM_STATS   SimStats;               // PM4 解码统计（escape 回传）
+
+    // ---- CCC 兼容设置（ccc.c，M2.6）----
+    ROK_CCC_SETTINGS CccSettings;
 } ROK_ADAPTER, *PROK_ADAPTER;
 
 // 逻辑设备上下文（DxgkDdiCreateDevice 分配）。
