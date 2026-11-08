@@ -24,11 +24,16 @@ typedef enum _DXGKDDI_WDDMVERSION {
 } DXGKDDI_WDDMVERSION;
 
 // ---- QueryAdapterInfo 类型 ----
+// （新增三项为 M2.8 面；编号在本 mock 内自洽，不跨 ABI，
+//   真实 WDK 编号仅与 MSVC 构建相关。）
 typedef enum _DXGK_QUERYADAPTERINFOTYPE {
     DXGKQAITYPE_DRIVERCAPS      = 15,
     DXGKQAITYPE_QUERYSEGMENT3   = 23,
     DXGKQAITYPE_QUERYSEGMENT4   = 36,
-    DXGKQAITYPE_GPUMMUCAPS      = 37
+    DXGKQAITYPE_GPUMMUCAPS      = 37,
+    DXGKQAITYPE_NUMPOWERCOMPONENTS          = 38,   // WIN8：电源组件数
+    DXGKQAITYPE_SEGMENTMEMORYSTATE          = 39,   // WDDM 2.0：段无效内存范围
+    DXGKQAITYPE_DISPLAY_DRIVERCAPS_EXTENSION = 40   // WDDM 2.0：显示扩展能力
 } DXGK_QUERYADAPTERINFOTYPE;
 
 // ---- OpenAllocation 的句柄翻译回调参数 ----
@@ -82,10 +87,37 @@ typedef struct _DXGK_QUERYSEGMENTOUT4 {
     DXGK_SEGMENTDESCRIPTOR4 *pSegmentDescriptor;
 } DXGK_QUERYSEGMENTOUT4;
 
+// ---- WDDM 2.0：段无效内存范围（VidMm 回避表；0 段模式下恒 0 条）----
+typedef struct _DXGK_MEMORYRANGE {
+    ULONGLONG BaseAddress;
+    ULONGLONG Length;
+} DXGK_MEMORYRANGE, *PDXGK_MEMORYRANGE;
+
+typedef struct _DXGK_QUERYSEGMENTMEMORYSTATE {
+    UINT                DriverSegmentId;
+    UINT                PhysicalAdapterIndex;
+    UINT                NumInvalidMemoryRanges;
+    DXGK_MEMORYRANGE    *pMemoryRanges;
+} DXGK_QUERYSEGMENTMEMORYSTATE, *PDXGK_QUERYSEGMENTMEMORYSTATE;
+
 typedef struct _DXGK_GPUMMUCAPS {
     BOOLEAN ReadOnly32BitRegisters;
     ULONG   Reserved;
 } DXGK_GPUMMUCAPS;
+
+// ---- WDDM 2.0：显示驱动扩展能力（SecureDisplay/VirtualMode/
+//      NonSpecificPrimary；render-only 全 0）----
+typedef struct _DXGK_DISPLAY_DRIVERCAPS_EXTENSION {
+    union {
+        struct {
+            ULONG SecureDisplaySupported:1;
+            ULONG VirtualModeSupported:1;
+            ULONG NonSpecificPrimarySupported:1;
+            ULONG Reserved:29;
+        };
+        ULONG Value;
+    } Caps;
+} DXGK_DISPLAY_DRIVERCAPS_EXTENSION, *PDXGK_DISPLAY_DRIVERCAPS_EXTENSION;
 
 typedef struct _DXGKARG_QUERYADAPTERINFO {
     DXGK_QUERYADAPTERINFOTYPE   Type;
@@ -332,6 +364,7 @@ typedef struct _DXGKARG_QUERYDEPENDENTENGINEGROUP {
 
 typedef struct _DXGKARG_QUERYENGINESTATUS {
     ULONG NodeOrdinal;
+    UINT  EngineOrdinal;        // WIN8：物理适配器内引擎序号
     struct {
         ULONG Responsive:1;
         ULONG Reserved:31;
@@ -411,6 +444,10 @@ typedef struct _DXGKARG_QUERYVIDPNHWCAPABILITY { ULONG Dummy[4]; } DXGKARG_QUERY
 typedef struct _DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY2 { ULONG Dummy; } DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY2;
 #define IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY2 \
     CONST DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY2*
+// MPO v1（WIN8 面；0 路 source 下仅保签名，字段桩化）。
+typedef struct _DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY { ULONG Dummy; } DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY;
+#define IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY \
+    CONST DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY*
 
 // ---- DDI 注册表（DriverEntry 填写 → DxgkInitialize 校验捕获）----
 // 成员类型用 ddi.h 同款宏拼写，保证签名强一致。
@@ -504,6 +541,15 @@ typedef VOID     (*DXGKDDI_SETSTABLEPOWERSTATE)(HANDLE, CONST DXGKARG_SETSTABLEP
 typedef NTSTATUS (*DXGKDDI_SETVIDEOPROTECTEDREGION)(HANDLE, CONST DXGKARG_SETVIDEOPROTECTEDREGION*);
 typedef NTSTATUS (*DXGKDDI_RESTARTFROMTIMEOUT)(HANDLE);
 
+// ---- M2.8 追加（0x5023 范围内最后一批成员；签名对照 WDK 26100）----
+typedef NTSTATUS (*DXGKDDI_LINK_DEVICE)(const PVOID, const PVOID, PLINKED_DEVICE);
+typedef NTSTATUS (*DXGKDDI_SETPOWERCOMPONENTFSTATE)(HANDLE, UINT, UINT);
+typedef NTSTATUS (*DXGKDDI_POWERRUNTIMECONTROLREQUEST)(HANDLE, LPCGUID, PVOID,
+                                                       SIZE_T, PVOID, SIZE_T, PSIZE_T);
+typedef NTSTATUS (*DXGKDDI_SETPOWERPSTATE)(HANDLE, UINT, UINT);
+typedef NTSTATUS (*DXGKDDI_SETVIDPNSOURCEADDRESSWITHMPO)(HANDLE,
+        CONST DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY*);
+
 typedef struct _DRIVER_INITIALIZATION_DATA {
     ULONG   Version;
 
@@ -514,6 +560,7 @@ typedef struct _DRIVER_INITIALIZATION_DATA {
     DXGKDDI_REMOVEDEVICE                    DxgkDdiRemoveDevice;
     DXGKDDI_RESETDEVICE                     DxgkDdiResetDevice;
     DXGKDDI_UNLOAD                          DxgkDdiUnload;
+    DXGKDDI_LINK_DEVICE                     DxgkDdiLinkDevice;      // M2.8：LDA 协商（基础成员）
 
     // 中断
     DXGKDDI_INTERRUPT_ROUTINE               DxgkDdiInterruptRoutine;
@@ -525,6 +572,8 @@ typedef struct _DRIVER_INITIALIZATION_DATA {
     DXGKDDI_QUERY_CHILD_STATUS              DxgkDdiQueryChildStatus;
     DXGKDDI_QUERY_DEVICE_DESCRIPTOR         DxgkDdiQueryDeviceDescriptor;
     DXGKDDI_SET_POWER_STATE                 DxgkDdiSetPowerState;
+    DXGKDDI_SETPOWERCOMPONENTFSTATE         DxgkDdiSetPowerComponentFState;         // M2.8：WIN8 电源组件
+    DXGKDDI_POWERRUNTIMECONTROLREQUEST      DxgkDdiPowerRuntimeControlRequest;      // M2.8：PEP 通道
     DXGKDDI_NOTIFY_ACPI_EVENT               DxgkDdiNotifyAcpiEvent;
     DXGKDDI_QUERY_INTERFACE                 DxgkDdiQueryInterface;
     DXGKDDI_GET_CHILD_CONTAINER_ID          DxgkDdiGetChildContainerId;
@@ -561,6 +610,7 @@ typedef struct _DRIVER_INITIALIZATION_DATA {
     DXGKDDI_UPDATEACTIVEVIDPNPRESENTPATH    DxgkDdiUpdateActiveVidPnPresentPath;
     DXGKDDI_RECOMMENDMONITORMODES           DxgkDdiRecommendMonitorModes;
     DXGKDDI_SETVIDPNSOURCEADDRESS           DxgkDdiSetVidPnSourceAddress;
+    DXGKDDI_SETVIDPNSOURCEADDRESSWITHMPO    DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay;  // M2.8：MPO v1（WIN8）
     DXGKDDI_SETVIDPNSOURCEVISIBILITY        DxgkDdiSetVidPnSourceVisibility;
     DXGKDDI_ENUMVIDPNCOFUNCMODALITY         DxgkDdiEnumVidPnCofuncModality;
     DXGKDDI_RECOMMENDVIDPNTOPOLOGY          DxgkDdiRecommendVidPnTopology;
@@ -598,6 +648,7 @@ typedef struct _DRIVER_INITIALIZATION_DATA {
     DXGKDDI_CHECKMULTIPLANEOVERLAYSUPPORT   DxgkDdiCheckMultiPlaneOverlaySupport;
     DXGKDDI_CALIBRATEGPUCLOCK               DxgkDdiCalibrateGpuClock;
     DXGKDDI_FORMATHISTORYBUFFER             DxgkDdiFormatHistoryBuffer;
+    DXGKDDI_SETPOWERPSTATE                  DxgkDdiSetPowerPState;      // M2.8：P-state（WDDM 1.3 面）
 
     // WDDM 2.0+
     DXGKDDI_SUBMITCOMMANDVIRTUAL            DxgkDdiSubmitCommandVirtual;

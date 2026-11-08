@@ -296,7 +296,6 @@ static void RunPassSimulated(VOID)
         DXGK_DRIVERCAPS caps;
         DXGK_QUERYSEGMENTOUT4 seg4;
         DXGK_GPUMMUCAPS mmu;
-
         memset(&q, 0, sizeof(q));
         q.Type = DXGKQAITYPE_DRIVERCAPS;
         q.pOutputData = &caps;
@@ -325,6 +324,41 @@ static void RunPassSimulated(VOID)
         st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
         CHECK(NT_SUCCESS(st));
         CHECK(mmu.ReadOnly32BitRegisters == FALSE && mmu.Reserved == 0);
+
+        // ---- M2.8 追加类型：电源组件数 / 段无效内存范围 / 显示扩展能力 ----
+        {
+            UINT nPower;
+            DXGK_QUERYSEGMENTMEMORYSTATE memState;
+            DXGK_DISPLAY_DRIVERCAPS_EXTENSION extCaps;
+
+            memset(&q, 0, sizeof(q));
+            q.Type = DXGKQAITYPE_NUMPOWERCOMPONENTS;
+            q.pOutputData = &nPower;
+            q.OutputDataSize = sizeof(nPower);
+            memset(&nPower, 0xAA, sizeof(nPower));
+            st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
+            CHECK(NT_SUCCESS(st));
+            CHECK(nPower == 0);     // 无电源组件（配套 FState 拒绝语义）
+
+            memset(&q, 0, sizeof(q));
+            q.Type = DXGKQAITYPE_SEGMENTMEMORYSTATE;
+            q.pOutputData = &memState;
+            q.OutputDataSize = sizeof(memState);
+            memset(&memState, 0xAA, sizeof(memState));
+            st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
+            CHECK(NT_SUCCESS(st));
+            CHECK(memState.NumInvalidMemoryRanges == 0);    // 0 段模式恒 0 条
+            CHECK(memState.pMemoryRanges == NULL);
+
+            memset(&q, 0, sizeof(q));
+            q.Type = DXGKQAITYPE_DISPLAY_DRIVERCAPS_EXTENSION;
+            q.pOutputData = &extCaps;
+            q.OutputDataSize = sizeof(extCaps);
+            memset(&extCaps, 0xAA, sizeof(extCaps));
+            st = c.ddi->DxgkDdiQueryAdapterInfo(c.hAdapter, &q);
+            CHECK(NT_SUCCESS(st));
+            CHECK(extCaps.Caps.Value == 0);                 // render-only 全 0
+        }
     }
 
     // ---- 进程 / 设备 / 分配 / 上下文 ----
@@ -610,6 +644,7 @@ static void RunPassSimulated(VOID)
         CHECK(qdg.DependentNodeOrdinalMask == 1);
 
         memset(&qes, 0, sizeof(qes));
+        qes.EngineOrdinal = 0;
         st = c.ddi->DxgkDdiQueryEngineStatus(c.hAdapter, &qes);
         CHECK(NT_SUCCESS(st));
         CHECK(qes.EngineStatus.Responsive == 1);
@@ -645,6 +680,37 @@ static void RunPassSimulated(VOID)
         CHECK(NT_SUCCESS(c.ddi->DxgkDdiCreateProcess(c.hAdapter, &cp2)));
         CHECK(cp2.hKmdProcess != NULL);
         c.ddi->DxgkDdiDestroyProcess(c.hAdapter, cp2.hKmdProcess);
+    }
+
+    // ---- M2.8 追加 DDI 面：LDA/电源组件/PEP/P-state/MPO v1
+    //      （签名绑定 + 与能力声明一致的确定性答复）----
+    {
+        LINKED_DEVICE linked;
+        GUID ctrlCode;
+        SIZE_T bytesReturned;
+        DXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY mpo1;
+
+        memset(&linked, 0, sizeof(linked));
+        CHECK(c.ddi->DxgkDdiLinkDevice((PDEVICE_OBJECT)(UINT_PTR)0x6000,
+                                       c.hAdapter, &linked)
+              == STATUS_NOT_SUPPORTED);                     // 单适配器明确拒绝
+
+        CHECK(c.ddi->DxgkDdiSetPowerComponentFState(c.hAdapter, 0, 0)
+              == STATUS_INVALID_PARAMETER);                 // 组件不存在语义
+
+        memset(&ctrlCode, 0, sizeof(ctrlCode));
+        bytesReturned = 0x1234;
+        CHECK(c.ddi->DxgkDdiPowerRuntimeControlRequest(
+                  c.hAdapter, &ctrlCode, NULL, 0, NULL, 0, &bytesReturned)
+              == STATUS_NOT_SUPPORTED);                     // runtime pm 未启用
+        CHECK(bytesReturned == 0);                          // 回执字节数必清零
+
+        CHECK(c.ddi->DxgkDdiSetPowerPState(c.hAdapter, 0, 0)
+              == STATUS_NOT_SUPPORTED);                     // 无时钟控制路径
+
+        memset(&mpo1, 0, sizeof(mpo1));
+        CHECK(c.ddi->DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay(
+                  c.hAdapter, &mpo1) == STATUS_NOT_IMPLEMENTED);    // 0 路 source
     }
 
     // ---- 拆除：链表/池全平衡（ASan leak 核对）----
@@ -813,6 +879,13 @@ static void RunDdiTableChecks(VOID)
     CHECK(ddi->DxgkDdiEscape != NULL);
     CHECK(ddi->DxgkDdiQueryCurrentFence != NULL);
     CHECK(ddi->DxgkDdiGetNodeMetadata != NULL);         // WDDM 1.3 面
+
+    // M2.8 追加成员点名（0x5023 版本全表非空的最后一批）。
+    CHECK(ddi->DxgkDdiLinkDevice != NULL);
+    CHECK(ddi->DxgkDdiSetPowerComponentFState != NULL);
+    CHECK(ddi->DxgkDdiPowerRuntimeControlRequest != NULL);
+    CHECK(ddi->DxgkDdiSetPowerPState != NULL);
+    CHECK(ddi->DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay != NULL);
 }
 
 // ------------------------------------------------------------------
