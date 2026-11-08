@@ -98,6 +98,12 @@ typedef PVOID*          PPVOID;
 #define _In_opt_
 #define _In_reads_bytes_(x)
 #define _In_reads_bytes_opt_(x)
+#define _Out_writes_z_(x)
+/* 旧式 WINBASE 风格注解（新增 DDI 声明逐字对齐 WDK 26100 时使用）*/
+#define IN
+#define OUT
+#define INOUT
+#define OPTIONAL
 #define _Inout_updates_bytes_(x)
 #define _Inout_updates_bytes_opt_(x)
 #define _Out_writes_bytes_(x)
@@ -196,6 +202,30 @@ static __inline LONG RokM2InterlockedExchange(volatile LONG *Target, LONG Value)
 #define InterlockedExchange(Target, Value) \
     RokM2InterlockedExchange((volatile LONG *)(Target), (LONG)(Value))
 
+static __inline LONG RokM2InterlockedCompareExchange(volatile LONG *Destination,
+                                                     LONG Exchange, LONG Comparand)
+{
+    return (LONG)__sync_val_compare_and_swap(Destination, Comparand, Exchange);
+}
+#define InterlockedCompareExchange(Destination, Exchange, Comparand) \
+    RokM2InterlockedCompareExchange((volatile LONG *)(Destination), (LONG)(Exchange), (LONG)(Comparand))
+
+static __inline LONG RokM2InterlockedIncrement(volatile LONG *Addend)
+{
+    return (LONG)__sync_add_and_fetch(Addend, 1);
+}
+#define InterlockedIncrement(Addend) RokM2InterlockedIncrement((volatile LONG *)(Addend))
+
+// ---- GUID / LPCGUID / PSIZE_T（PowerRuntimeControlRequest 签名用）----
+typedef struct _GUID {
+    ULONG Data1;
+    USHORT Data2;
+    USHORT Data3;
+    UCHAR Data4[8];
+} GUID;
+typedef const GUID *LPCGUID;
+typedef SIZE_T *PSIZE_T;
+
 // ---- NTSTATUS ----
 typedef LONG NTSTATUS;
 #define NT_SUCCESS(s)   (((NTSTATUS)(s)) >= 0)
@@ -291,3 +321,13 @@ typedef struct _ROK_MOCK_REG_VALUE {
 extern ROK_MOCK_REG_VALUE rok_mock_registry[];
 extern const int          rok_mock_registry_count;
 void rok_mock_registry_reset(void);
+
+// ---- MMIO（BAR0）mock + 停顿计数（r600hw.c 宿主构建用，语义同 kmock1）----
+// E2E 走模拟设备路径，BAR0 理应零访问；越界读写即 abort（暴露意外直访）。
+#define ROK_KMOCK_MMIO_SIZE 0x10000
+extern unsigned char rok_mock_mmio[ROK_KMOCK_MMIO_SIZE];
+ULONG rok_mock_read_reg(volatile ULONG *p);
+void  rok_mock_write_reg(volatile ULONG *p, ULONG v);
+#define READ_REGISTER_ULONG(p)      rok_mock_read_reg((p))
+#define WRITE_REGISTER_ULONG(p, v)  rok_mock_write_reg((p), (v))
+void KeStallExecutionProcessor(ULONG us);

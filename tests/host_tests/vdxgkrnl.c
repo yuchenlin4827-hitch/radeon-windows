@@ -668,3 +668,57 @@ void RokVdxgReset(VOID)
     g_LastOpenedChars = 0;
     g_LastOpenedPath[0] = L'\0';
 }
+
+// ------------------------------------------------------------------
+// MMIO（BAR0）mock + 停顿计数（kmock2 版，实现语义同 kmock1/mock_registry.c）
+// ------------------------------------------------------------------
+unsigned char rok_mock_mmio[ROK_KMOCK_MMIO_SIZE];
+
+static BOOLEAN RokMockMmioContains(volatile ULONG *p)
+{
+    UINT_PTR addr = (UINT_PTR)p;
+    UINT_PTR base = (UINT_PTR)rok_mock_mmio;
+
+    if (addr >= base && addr + sizeof(ULONG) <= base + ROK_KMOCK_MMIO_SIZE)
+    {
+        return TRUE;
+    }
+    // e2e 真实形态（sim off）走 VdxgkCbMapMemory 的 BAR0 映射（calloc 全零
+    // = 寄存器复位默认值：GRBM_STATUS=0 即空闲，CONFIG_MEMSIZE=0 走
+    // "超范围不上报"路径），与 kmock2 守卫共用同一判定。
+    if (g_VpciBar0Mapping != NULL && g_VpciBar0Size > 0)
+    {
+        UINT_PTR mbase = (UINT_PTR)g_VpciBar0Mapping;
+        if (addr >= mbase && addr + sizeof(ULONG) <= mbase + g_VpciBar0Size)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+ULONG rok_mock_read_reg(volatile ULONG *p)
+{
+    if (!RokMockMmioContains(p))
+    {
+        fprintf(stderr, "[vdxgkrnl] MMIO read outside mock BAR0: %p\n", (void *)p);
+        abort();
+    }
+    return *(const volatile ULONG *)p;
+}
+
+void rok_mock_write_reg(volatile ULONG *p, ULONG v)
+{
+    if (!RokMockMmioContains(p))
+    {
+        fprintf(stderr, "[vdxgkrnl] MMIO write outside mock BAR0: %p\n", (void *)p);
+        abort();
+    }
+    *(volatile ULONG *)p = v;
+}
+
+void KeStallExecutionProcessor(ULONG us)
+{
+    // E2E 不断言轮询次数，仅保证可链接（真实停顿在宿主上是无害空转前的占位）。
+    (void)us;
+}
