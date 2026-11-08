@@ -146,8 +146,9 @@ static UINT RokBuildRenderPm4(UINT32 *dw)
 {
     UINT n = 0;
 
-    // type-0 寄存器写包：body=4（包头 + 3 数据）。
-    dw[n++] = (UINT32)((3u << 16) | 0x0000);
+    // type-0 寄存器写包：包头 + 3 数据（count 字段 = 2；type-0 与 type-3
+    // 同语义：包体 = count+1，M3.4a 对照内核 r600_cs.c 解析器修正）。
+    dw[n++] = (UINT32)((2u << 16) | 0x0000);
     dw[n++] = 0x00002820;
     dw[n++] = 0x00000001;
     dw[n++] = 0x00000002;
@@ -158,19 +159,22 @@ static UINT RokBuildRenderPm4(UINT32 *dw)
     dw[n++] = PM4_TYPE2_FILLER;
 
     // type-3 INDIRECT_BUFFER（op 0x32）：base=0x10000000，512 dwords。
-    dw[n++] = PM4_TYPE3(0x32, 4);
+    // count 字段 = 包体数-1 = 2（包头 + 3 包体，总长 4）。
+    dw[n++] = PM4_TYPE3(0x32, 3);
     dw[n++] = 0x10000000;
     dw[n++] = 0x00000000;
     dw[n++] = 512;
 
-    // type-3 EVENT_WRITE_EOP（op 0x47）：fence 值 77。
-    dw[n++] = PM4_TYPE3(0x47, 4);
+    // type-3 EVENT_WRITE_EOP（op 0x47）：fence 值 77（3 包体）。
+    dw[n++] = PM4_TYPE3(0x47, 3);
     dw[n++] = 0x00001000;
     dw[n++] = 0x00000000;
     dw[n++] = 77;
 
-    // type-3 NOP（op 0x10）。
+    // type-3 NOP（op 0x10）：count 字段 0 → 真实 CP 会再取 1 个包体
+    // dword —— 补一个 type-2 filler 作包体，保证流尾对齐。
     dw[n++] = PM4_NOP_DWORD;
+    dw[n++] = PM4_TYPE2_FILLER;
 
     return n * 4;   // 字节数
 }
@@ -489,8 +493,10 @@ static void RunPassSimulated(VOID)
         st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_SIM_STATUS,
                             &sim, sizeof(sim));
         CHECK(NT_SUCCESS(st));
-        CHECK(sim.PacketCount == 3 + 64);
-        CHECK(sim.OpcodeCounts[0x10 & 0x3F] == 65);     // 1 + 64 NOP
+        // 分页填充缓冲 = 64 × 0xC0001000：count=0 的 NOP 会与相邻 dword
+        // 成对消耗（真实 CP 语义），64 dwords → 32 个 NOP 包。
+        CHECK(sim.PacketCount == 3 + 32);
+        CHECK(sim.OpcodeCounts[0x10 & 0x3F] == 33);     // 1 + 32 NOP
         CHECK(sim.LastFenceSubmitted == 79);
         CHECK(sim.LastIndirectBaseLo == 0x10000000);    // 不被后续提交覆盖
     }
@@ -516,7 +522,7 @@ static void RunPassSimulated(VOID)
         st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_VERSION,
                             &ver, sizeof(ver));
         CHECK(NT_SUCCESS(st));
-        CHECK(ver.Major == 0 && ver.Minor == 1 && ver.Patch == 0);
+        CHECK(ver.Major == 0 && ver.Minor == 2 && ver.Patch == 3);   // v0.2.3-alpha
         CHECK(ver.WddmInterfaceVersion == 0x5023);
 
         st = RokEscapeQuery(c.hAdapter, ROK_ESC_TYPE_QUERY_PCI_ID,

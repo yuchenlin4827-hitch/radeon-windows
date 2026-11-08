@@ -153,7 +153,7 @@ vk_audit.exe --strict   :: 有缺口时返回非零退出码（CI 友好）
 | M0 | 仓库 / CI / 探测工具 / 文档 | ✅（CI 绿灯，rokmd.sys 产出） |
 | M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 |
 | M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架编译通过（CI 产出 .sys）；M2.8：0x5023 DDI 表全量补齐，待实机加载验证 |
-| M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先） |
+| M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | 🚧 M3.1（VRAM 探测/家族表）、M3.4a（CP 微码内嵌 + ring 初始化观测，默认关闭）已交付 |
 | M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜ |
 | M5 | OpenGL 可行性评估（存档，结论并入 M7） | ⬜ |
 | M5.5 | terakan 冲 Vulkan 1.3（门控模块 + vk_audit 已就绪） | ⬜ |

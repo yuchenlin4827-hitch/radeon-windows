@@ -50,7 +50,25 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
      实例，强制模拟模式跑通 WDDM 管线，不触碰真实硬件。
      详见仓库 docs/simulated-device.md。
 
-四、卸载
+  6.（可选，M3.4a）CP ring bring-up 实验（默认关闭，未开启时驱动对
+     硬件零写入）：
+
+       reg add "<驱动键>\Parameters" /v EnableRing /t REG_DWORD /d 1 /f
+
+     重启生效后，驱动会执行 Evergreen CP 初始化序列（微码写入/软复位/
+     ring 编程/ME_INIT/scratch 回环测试）。用 gpu_probe.exe [4.9] 段
+     观测：`ring bring-up: PASS` 即 CP 已从 ring 取指。风险与边界见
+     仓库 docs/bringup-safety.md 第 3.5 节。
+
+四、探测工具输出说明（v0.2.3）
+----------------------------------------------------------
+  [1.7] PCI memory resources：用户态即可读到的 BAR 形态 —— TeraScale 卡
+        预期 BAR0 = VRAM 孔径（>16MB）、BAR2 = MMIO 寄存器窗口（256-512KB）。
+  [4.9] QUERY_HW_STATUS：装了 rokmd 后的只读寄存器快照（VRAM/FB 地址/
+        GRBM/SRBM/CP 状态/ring test 结果）；非 rokmd 适配器报 0xC0000001
+        系错误属预期。
+
+五、卸载
 ----------------------------------------------------------
        pnputil /enum-drivers          （找到 oemXX.inf 对应 rokmd）
        pnputil /delete-driver oemXX.inf /uninstall
@@ -58,8 +76,8 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
 
 五、注意事项
 ----------------------------------------------------------
-  - 当前版本为 M2.6：完成设备枚举/启动/卸载、全量 DXGK DDI 表面
-    （0x5023 / WDDM 2.0）、escape 通道与模拟设备后端；
-    尚不具备真实渲染能力；UMD（terakan Vulkan）接入是 M4 里程碑。
+  - 当前版本为 M3.4a：M2 全量 WDDM 2.0 DDI/escape/模拟设备 + CP 微码
+    内嵌与 ring 初始化观测路径（默认关闭）；尚不具备真实渲染能力；
+    真实 ring 提交是 M3.4b，UMD（terakan Vulkan）接入是 M4 里程碑。
   - 若安装后出现异常，进入安全模式执行"卸载"步骤即可恢复。
   - 请勿在生产环境使用；实验环境建议先做系统还原点。

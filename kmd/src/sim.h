@@ -38,6 +38,14 @@ struct _ROK_ADAPTER;
 
 BOOLEAN RokSimIsSimulatedDeviceId(_In_ ULONG DeviceId);
 
+// 共享注册表 DWORD 读取（sim 判定与 M3.4a EnableRing 开关共用）：
+// 读 <RootPath>[\<SubKey>]\ValueName；host 测试经 mock 注册表注入。
+BOOLEAN RokRegReadUlongValue(
+    _In_ PUNICODE_STRING RootPath,
+    _In_opt_ PCWSTR SubKey,
+    _In_ PCWSTR ValueName,
+    _Out_ PULONG OutValue);
+
 // CPUID 探测 hypervisor（leaf 1 ECX bit 31 + leaf 0x40000000 厂商串）。
 BOOLEAN RokSimHypervisorPresent(VOID);
 

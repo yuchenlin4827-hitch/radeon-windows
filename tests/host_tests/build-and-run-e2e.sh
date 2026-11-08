@@ -18,8 +18,8 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "${SCRATCH}"' EXIT
 
 KMD_SRC="${REPO_ROOT}/kmd/src"
-FILES="adapter.h adapter.c sim.h sim.c ccc.h ccc.c ddi.h ddi.c driver.c precomp.h rok_escape.h"
-COMPILE_SRCS="adapter.c sim.c ccc.c ddi.c driver.c"
+FILES="adapter.h adapter.c sim.h sim.c ccc.h ccc.c ddi.h ddi.c driver.c precomp.h rok_escape.h ring.h ring.c gfxinit.h gfxinit.c regs_ts2.h evergreen_ucode.c"
+COMPILE_SRCS="adapter.c sim.c ccc.c ddi.c driver.c ring.c gfxinit.c evergreen_ucode.c"
 
 echo "[e2e] repo = ${REPO_ROOT}"
 
@@ -48,7 +48,8 @@ command -v "${CC}" >/dev/null || CC=clang
     -o "${SCRATCH}/run_simdevice" \
     run_simdevice.c vdxgkrnl.c \
     "${SCRATCH}/adapter.c" "${SCRATCH}/sim.c" "${SCRATCH}/ccc.c" \
-    "${SCRATCH}/ddi.c" "${SCRATCH}/driver.c"
+    "${SCRATCH}/ddi.c" "${SCRATCH}/driver.c" \
+    "${SCRATCH}/ring.c" "${SCRATCH}/gfxinit.c" "${SCRATCH}/evergreen_ucode.c"
 
 # 4) 编译后再校验：确保编译过程没有副作用改动源文件。
 ( cd "${KMD_SRC}" && sha256sum ${FILES} ) > "${SCRATCH}/manifest.post"

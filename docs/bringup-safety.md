@@ -60,12 +60,51 @@ tools\gpu_probe.exe                  :: 观察 [2] UMD dll 与 [4] escape 通道
 ## 3. 当前版本不做的事
 
 - 不碰显示管线（VidPn/Present 全 stub）；
-- 不提交真实 PM4 到硬件（M3.2/M3.4：CP ring + IH）；
+- **默认不写任何硬件寄存器**——CP ring 序列（M3.4a）默认关闭，见下节；
+- 不提交真实 PM4 到硬件（M3.4b/M3.6：CP ring 提交 + VidMm 对接）；
 - 不改时钟/电源状态（CCC 值仅登记，无硬件副作用）。
 
 因此理论上即使"装上"，最坏情况也只影响显示路径（驱动级），不刷固件、
 不写 SPI——但 Windows 图形栈的失败模式（TDR 循环/黑屏）依然会毁掉操作
 便利性，请务必按第 2 节顺序执行。
+
+## 3.5 CP ring bring-up（M3.4a，可选实验）
+
+v0.2.3-alpha 起，rokmd 携带完整的 Evergreen CP ring 初始化序列
+（微码写入 → GRBM 软复位 → CP_RB_* → ME_INIT → scratch 回环测试），
+与 Linux radeon `evergreen.c` 同源。**默认关闭**——不设置下列注册表值时，
+驱动对硬件零写入，行为与 v0.2.2 完全一致。
+
+开启方式（管理员，驱动键即适配器实例的 `HKLM\SYSTEM\...\Class\{4d36e968}...\000X`）：
+
+```bat
+reg add "<驱动键>\Parameters" /v EnableRing /t REG_DWORD /d 1 /f
+:: 重启（或禁用/启用设备）后生效
+```
+
+开启后序列做什么：
+
+1. 写入 CAICOS PFP（1120 dwords）+ ME（1376 dwords）微码；
+2. GRBM 软复位 CP/PA/SH/VGT/SPI/SX（15ms）；
+3. 在 VRAM 孔径内 8MB 偏移放 32KB ring（`MC_VM_FB_LOCATION` 推导总线地址），
+   编程 CP_RB_BASE/CNTL（NO_UPDATE，rptr 从 MMIO 轮询）；
+4. 写 ME_INIT 并解除 CP 停机；
+5. scratch 回环测试：MMIO 写 0xCAFEDEAD → ring 发 SET_CONFIG_REG 包 →
+   轮询该 scratch 变为 0xDEADBEEF。
+
+成功判据：`gpu_probe.exe` [4.9] 段打印
+`rokmd ring: ready=1 ... test=PASS` 与
+`-> M3.4a ring bring-up: PASS`。
+
+风险与边界：
+
+- 序列只写 CP/GRBM/scratch 域，**不触碰显示与 MC 配置**；失败模式是
+  "ring test FAIL"（驱动停回 ME 停机态），不会主动触发 TDR（提交路径
+  未接线）。最坏情况 = CP 域状态被我们复位，原驱动已不在运行，无额外受害者。
+- 热替换场景（Catalyst → rokmd）MC 已由前驱动配置；冷启动场景依赖
+  VBIOS 配置的 MC_VM_FB_LOCATION——若为 0，ring 初始化拒绝执行（日志可查）。
+- MC 微码（BTC_mc.bin）/ RLC（BTC_rlc.bin）尚未加载：若实机显示
+  CP_STAT 卡死、rptr 不动，即为缺失 RLC 的信号，是 M3.5 的输入数据。
 
 ## 4. 验收数据回传
 

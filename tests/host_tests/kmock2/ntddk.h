@@ -196,6 +196,28 @@ static __inline LONG RokM2InterlockedExchange(volatile LONG *Target, LONG Value)
 #define InterlockedExchange(Target, Value) \
     RokM2InterlockedExchange((volatile LONG *)(Target), (LONG)(Value))
 
+// ---- M2.8/M3.4a 增补（ddi.c/driver.c/gfxinit.c 引用面）----
+#define IN
+#define OUT
+#define OPTIONAL
+#ifndef PSIZE_T
+#define PSIZE_T SIZE_T*
+#endif
+typedef struct _LINKED_DEVICE { ULONG Dummy; } LINKED_DEVICE, *PLINKED_DEVICE;
+#define INOUT_PLINKED_DEVICE    PLINKED_DEVICE
+static __inline LONG RokM3InterlockedIncrement(volatile LONG *Addend)
+{ return (LONG)__atomic_add_fetch(Addend, 1, __ATOMIC_SEQ_CST); }
+static __inline LONG RokM3InterlockedCompareExchange(volatile LONG *Destination,
+                                                     LONG Ex, LONG Cmp)
+{ return (LONG)__atomic_compare_exchange_n(Destination, &Cmp, Ex, 0,
+                                           __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+         ? (LONG)Cmp : (LONG)__atomic_load_n(Destination, __ATOMIC_SEQ_CST); }
+#define InterlockedIncrement(Target) \
+    RokM3InterlockedIncrement((volatile LONG *)(Target))
+#define InterlockedCompareExchange(Destination, Exchange, Comparand) \
+    RokM3InterlockedCompareExchange((volatile LONG *)(Destination), \
+                                    (LONG)(Exchange), (LONG)(Comparand))
+
 // ---- NTSTATUS ----
 typedef LONG NTSTATUS;
 #define NT_SUCCESS(s)   (((NTSTATUS)(s)) >= 0)
@@ -291,3 +313,24 @@ typedef struct _ROK_MOCK_REG_VALUE {
 extern ROK_MOCK_REG_VALUE rok_mock_registry[];
 extern const int          rok_mock_registry_count;
 void rok_mock_registry_reset(void);
+
+// ---- M3.4a 增补（gfxinit.c/ring.c 的原语面）----
+// MMIO 原语：宿主编译为普通内存访问（vdxgkrnl 的 BAR0 映射是 calloc 缓冲）。
+#ifndef READ_REGISTER_ULONG
+#define READ_REGISTER_ULONG(reg)        (*(volatile ULONG *)(reg))
+#endif
+#ifndef WRITE_REGISTER_ULONG
+#define WRITE_REGISTER_ULONG(reg, val)  ((void)(*(volatile ULONG *)(reg) = (val)))
+#endif
+#ifndef STATUS_DEVICE_HARDWARE_ERROR
+#define STATUS_DEVICE_HARDWARE_ERROR    ((NTSTATUS)0xC000035BL)
+#endif
+// 延时原语：演练/宿主路径零等待。
+#ifndef KernelMode
+#define KernelMode  0
+#endif
+static inline NTSTATUS KeDelayExecutionThread(int Mode, BOOLEAN Alertable,
+                                              LARGE_INTEGER *Interval)
+{ (void)Mode; (void)Alertable; (void)Interval; return 0; }
+static inline void KeStallExecutionProcessor(ULONG MicroSeconds)
+{ (void)MicroSeconds; }

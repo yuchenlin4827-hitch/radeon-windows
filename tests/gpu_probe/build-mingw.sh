@@ -20,9 +20,10 @@ else
     EXTRA_LIBS="-static-libgcc"
 fi
 # -I：引入共享契约头 rok_escape.h（KMD/ICD/gpu_probe 同源 ABI）
+# -lsetupapi/-lcfgmgr32：PCI 设备枚举 + 分配资源（[1]/[1.7] 段）
 "${CC}" -O2 -Wall -Wextra -Wno-unused-parameter \
     -I../../kmd/src -DROK_PROBE_HAS_ESCAPE_ABI=1 \
-    -o gpu_probe.exe gpu_probe.c -lsetupapi ${EXTRA_LIBS}
+    -o gpu_probe.exe gpu_probe.c -lsetupapi -lcfgmgr32 ${EXTRA_LIBS}
 
 echo "[gpu_probe] built: $(ls -l gpu_probe.exe | awk '{print $5}') bytes"
 file gpu_probe.exe

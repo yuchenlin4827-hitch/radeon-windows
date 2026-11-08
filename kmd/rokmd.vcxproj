@@ -113,6 +113,9 @@
     <ClCompile Include="src\ddi.c" />
     <ClCompile Include="src\sim.c" />
     <ClCompile Include="src\ccc.c" />
+    <ClCompile Include="src\ring.c" />
+    <ClCompile Include="src\gfxinit.c" />
+    <ClCompile Include="src\evergreen_ucode.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\precomp.h" />
@@ -121,6 +124,9 @@
     <ClInclude Include="src\rok_escape.h" />
     <ClInclude Include="src\sim.h" />
     <ClInclude Include="src\ccc.h" />
+    <ClInclude Include="src\ring.h" />
+    <ClInclude Include="src\gfxinit.h" />
+    <ClInclude Include="src\regs_ts2.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="rokmd.inf" />

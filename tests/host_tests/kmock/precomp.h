@@ -41,6 +41,8 @@ typedef void*           PDEVICE_OBJECT;     // ccc.c/sim.c 不解引用，仅占
 typedef unsigned long   SIZE_T;
 typedef intptr_t        INT_PTR;
 typedef uintptr_t       UINT_PTR;
+typedef long long       LONGLONG;
+typedef unsigned long long ULONGLONG;
 typedef ULONG*          PULONG;
 typedef LONG*           PLONG;
 typedef UCHAR*          PUCHAR;
@@ -195,9 +197,45 @@ typedef struct _LIST_ENTRY {
     struct _LIST_ENTRY *Blink;
 } LIST_ENTRY, *PLIST_ENTRY;
 typedef CHAR KSPIN_LOCK;
-typedef UINT64 PHYSICAL_ADDRESS;
-typedef struct _DXGKRNL_INTERFACE_MOCK {    // 值字段占位（仅声明面被编译）
-    ULONG Dummy;
+// PHYSICAL_ADDRESS 以值字段使用且 gfxinit.c 访问 .QuadPart —— 用 union。
+typedef union _PHYSICAL_ADDRESS {
+    LONGLONG QuadPart;
+    UINT64   Raw;
+} PHYSICAL_ADDRESS;
+typedef union _LARGE_INTEGER_MOCK {
+    LONGLONG QuadPart;
+    UINT64   Raw;
+} LARGE_INTEGER;
+typedef int KPROCESSOR_MODE;
+#define KernelMode  0
+#define UserMode    1
+static inline NTSTATUS KeDelayExecutionThread(KPROCESSOR_MODE Mode,
+                                              BOOLEAN Alertable,
+                                              union _LARGE_INTEGER_MOCK *Interval)
+{ (void)Mode; (void)Alertable; (void)Interval; return 0; }   // 演练路径零等待
+static inline void KeStallExecutionProcessor(ULONG MicroSeconds)
+{ (void)MicroSeconds; }
+
+// ---- MMIO 原语（gfxinit.c 真实模式路径；宿主编译为普通内存访问）----
+#define READ_REGISTER_ULONG(reg)        (*(volatile ULONG *)(reg))
+#define WRITE_REGISTER_ULONG(reg, val)  ((void)(*(volatile ULONG *)(reg) = (val)))
+#define STATUS_DEVICE_HARDWARE_ERROR    ((NTSTATUS)0xC000035BL)
+#define STATUS_DEVICE_CONFIGURATION_ERROR ((NTSTATUS)0xC0000113L)
+#define STATUS_NOT_SUPPORTED            ((NTSTATUS)0xC00000BBL)
+
+// DxgkCb* 回调面（gfxinit.c 非演练路径引用成员名；演练模式不调用）。
+typedef enum _MEMORY_CACHING_TYPE {
+    MmNonCached = 0,
+    MmCached = 1
+} MEMORY_CACHING_TYPE;
+typedef struct _DXGKRNL_INTERFACE_MOCK {
+    ULONG  Dummy;
+    HANDLE DeviceHandle;
+    NTSTATUS (*DxgkCbMapMemory)(HANDLE DeviceHandle, PHYSICAL_ADDRESS BaseAddress,
+                                ULONG NumberOfBytes, BOOLEAN InIoSpace,
+                                BOOLEAN MapToUserMode,
+                                MEMORY_CACHING_TYPE CacheType, PVOID *VirtualAddress);
+    VOID (*DxgkCbUnmapMemory)(HANDLE DeviceHandle, PVOID VirtualAddress);
 } DXGKRNL_INTERFACE;
 typedef struct _PCM_RESOURCE_LIST_MOCK {    // 以指针传递，仅需前向形态
     ULONG Dummy;

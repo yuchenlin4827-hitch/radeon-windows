@@ -14,6 +14,7 @@
 #include "precomp.h"
 #include "sim.h"    // ROK_SIM_STATS（模拟设备统计，sim.c 实现）
 #include "ccc.h"    // ROK_CCC_SETTINGS（CCC 兼容设置，ccc.c 实现）
+#include "ring.h"   // ROK_RING（GFX ring 状态，M3.4a；ring.c 实现）
 
 typedef struct _ROK_ADAPTER {
     // ---- VidMm / 上下文簿记 ----
@@ -45,6 +46,17 @@ typedef struct _ROK_ADAPTER {
     // \VramSizeMb 覆盖（默认 256MB，sim.c）。GTT 尺寸 M3.2 落地前保持 0。
     UINT64          VramSizeBytes;
     UINT64          GartSizeBytes;
+
+    // ---- M3.4a：CP ring bring-up（gfxinit.c）----
+    ROK_RING        Ring;                   // GFX ring 状态（观测）
+    PHYSICAL_ADDRESS ApertureBase;          // 资源清单中最大 MEM 窗口（BAR0 孔径）
+    ULONG           ApertureLength;
+    BOOLEAN         RingEnableRequested;    // <DriverKey>\Parameters\EnableRing = 1
+    BOOLEAN         RingWindowMapped;       // ring 窗口经 DxgkCbMapMemory 映射
+    BOOLEAN         RingWindowPool;         // 演练模式：ring 内存来自池分配
+    BOOLEAN         UcodeLoaded;            // CP PFP/ME 微码已写入
+    ULONG           RingTestRetries;        // ring test 轮询次数（观测）
+    ULONG           RingTestValue;          // ring test 末次 scratch 读值（观测）
 
     // ---- 命令进度 ----
     // "即时完成"模型：提交即完成，OS 经 DxgkDdiQueryCurrentFence 轮询

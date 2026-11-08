@@ -81,7 +81,7 @@ jobs:
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
-          cl /nologo /O2 /W4 /utf-8 /I kmd\src /DROK_PROBE_HAS_ESCAPE_ABI=1 /Fe:gpu_probe.exe tests\gpu_probe\gpu_probe.c /link gdi32.lib setupapi.lib user32.lib advapi32.lib
+          cl /nologo /O2 /W4 /utf-8 /I kmd\src /DROK_PROBE_HAS_ESCAPE_ABI=1 /Fe:gpu_probe.exe tests\gpu_probe\gpu_probe.c /link gdi32.lib setupapi.lib cfgmgr32.lib user32.lib advapi32.lib
 
       - name: Package installer (tag only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -115,9 +115,17 @@ jobs:
 
             ## 安装（管理员权限）
             1. 解压后运行 `bcdedit /set testsigning on` 并重启（测试模式水印）
-            2. 运行 `tools\gpu_probe.exe` 确认显卡 PCI ID 在支持表内
+            2. 运行 `tools\gpu_probe.exe` 确认显卡 PCI ID 在支持表内（[1.7] 段核对 BAR 形态）
             3. `pnputil /add-driver rokmd.inf /install`
             4. 详见包内 `INSTALL.txt`
+
+            ## 本版新增（M3.4a，v0.2.3-alpha）
+            - CP 微码内嵌（linux-firmware CAICOS PFP 1120 + ME 1376 dwords）
+            - Evergreen CP ring 初始化序列（GRBM 软复位 + CP_RB_* + ME_INIT + ring test），
+              **默认关闭**：`<驱动键>\Parameters\EnableRing = 1` 显式开启（零 TDR 风险）
+            - escape v1 新增 `QUERY_HW_STATUS (type 10)`：只读寄存器/CP 状态快照，
+              gpu_probe [1.7]（PCI 资源）与 [4.9]（硬件状态）配合观测
+            - PM4 解码器 count 语义修正（对照内核 r600_cs.c：包总长 = count+2）
 
             ## 支持硬件（AMD TeraScale，VEN_1002）
             | 代际 | 系列 | 设备 ID |
@@ -126,7 +134,8 @@ jobs:
             | Sumo/SuperSumo | Llano APU 内显（HD 6520G/6480G 等） | 0x9640-0x964F |
             | TeraScale 1-3 全家族 | HD 2000-4000 / HD 5000 / HD 6000-7000 / Trinity APU | 300+ 设备 ID（见 rokmd.inf） |
 
-            ## 当前状态（M2.6）
-            - 全量 WDDM 2.0（0x5023）DXGK DDI 表面、escape 通道、模拟设备后端（虚拟机实验）
-            - 尚无真实渲染能力；terakan Vulkan UMD 接入在 M4 里程碑
+            ## 当前状态（M3.4a）
+            - WDDM 2.0 (0x5023) 全量 DDI 表 + escape 通道 v1（10 类查询）+ 模拟设备后端
+            - CP ring：初始化/观测路径就绪（主机端 176 项单测覆盖演练序列）；真实提交在 M3.4b
             - ⚠️ 未经 WHQL 认证，仅供实验环境；安装需测试签名模式
+            - ⚠️ render-only 驱动接管唯一显示 GPU ≈ 无头风险，先读包内 INSTALL.txt 与 docs/bringup-safety.md

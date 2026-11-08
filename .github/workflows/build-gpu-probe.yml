@@ -32,7 +32,7 @@ jobs:
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
-          cl /nologo /O2 /W4 /utf-8 /I kmd\src /DROK_PROBE_HAS_ESCAPE_ABI=1 /Fe:gpu_probe-msvc.exe tests\gpu_probe\gpu_probe.c /link gdi32.lib setupapi.lib user32.lib advapi32.lib
+          cl /nologo /O2 /W4 /utf-8 /I kmd\src /DROK_PROBE_HAS_ESCAPE_ABI=1 /Fe:gpu_probe-msvc.exe tests\gpu_probe\gpu_probe.c /link gdi32.lib setupapi.lib cfgmgr32.lib user32.lib advapi32.lib
       - uses: actions/upload-artifact@v4
         with:
           name: gpu_probe-msvc-x64

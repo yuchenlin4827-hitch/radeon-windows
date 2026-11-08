@@ -21,6 +21,11 @@
 // 内存池标签（调试时用于 pool 查找）
 #define ROK_POOL_TAG 'DkoR'
 
+// 驱动版本（escape QUERY_VERSION 上报；与 Release tag 同步升位）。
+#define ROK_VERSION_MAJOR   0
+#define ROK_VERSION_MINOR   2
+#define ROK_VERSION_PATCH   3
+
 // 内核构建标记：rok_escape.h 依此在"内核类型（ntddk）"与
 // "用户态类型（stdint）"之间切换 —— 同一份 ABI 契约头同时供
 // KMD、gpu_probe（用户态）与未来的 terakan ICD 编译。

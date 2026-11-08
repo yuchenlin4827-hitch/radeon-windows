@@ -22,6 +22,7 @@
 #include "precomp.h"
 #include "adapter.h"
 #include "ddi.h"
+#include "gfxinit.h"
 #include "rok_escape.h"
 #include "sim.h"
 #include "ccc.h"
@@ -34,8 +35,11 @@ typedef struct _ROK_SUBMIT_PRIV
     UINT32 Flags;
 } ROK_SUBMIT_PRIV;
 
-// TeraScale PM4：type-3 包头 = 0xC0000000 | (count-1)<<16 | opcode<<8；
-// IT_NOP（opcode 0x10）无参数体即单 DWORD 0xC0001000。
+// TeraScale PM4：type-3 包头 = 0xC0000000 | (count-1)<<16 | opcode<<8，
+// count 字段 = 包体 dword 数 - 1（M3.4a 对照内核 r600_cs.c 解析器修正）；
+// IT_NOP（opcode 0x10）count=0 时真实 CP 会再取 1 个包体 dword —— 本驱动
+// 以 0xC0001000 连续填充的页缓冲在真实 ring 上会成对消耗，作占位符无害；
+// M3.4b 切真实提交时改为 0xC0001000 + 0x80000000 成对填充。
 #define ROK_PM4_NOP_DWORD   0xC0001000UL
 #define ROK_PM4_NOP_MAX     256
 
@@ -1074,9 +1078,9 @@ RokDdiEscape(
             return STATUS_BUFFER_TOO_SMALL;
         }
         out = (PROK_ESC_VERSION_OUT)(header + 1);
-        out->Major = 0;
-        out->Minor = 1;
-        out->Patch = 0;
+        out->Major = ROK_VERSION_MAJOR;
+        out->Minor = ROK_VERSION_MINOR;
+        out->Patch = ROK_VERSION_PATCH;
         out->WddmInterfaceVersion = (UINT32)DXGKDDI_INTERFACE_VERSION;
         return STATUS_SUCCESS;
     }
@@ -1125,7 +1129,8 @@ RokDdiEscape(
         }
         out = (PROK_ESC_CAPS_OUT)(header + 1);
         out->CapsMask = ROK_CAP_PCI_ID_VALID | ROK_CAP_SEGMENT_QUERY |
-                        ROK_CAP_ENGINE_STATUS_QUERY;   // M2.8：引擎状态查询可用
+                        ROK_CAP_ENGINE_STATUS_QUERY |   // M2.8：引擎状态查询可用
+                        ROK_CAP_HW_STATUS_QUERY;        // M3.4a：硬件状态快照可用
         if (adapter->MmioVirtualAddress != NULL)
         {
             out->CapsMask |= ROK_CAP_MMIO_MAPPED;
@@ -1270,6 +1275,19 @@ RokDdiEscape(
         out->Reserved[0] = 0;
         out->Reserved[1] = 0;
         return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_QUERY_HW_STATUS:          // M3.4a：寄存器/CP 状态只读快照
+    {
+        PROK_ESC_HW_STATUS_OUT out;
+
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_HW_STATUS_OUT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_HW_STATUS_OUT)(header + 1);
+        return RokGfxProbeStatus(adapter, out);
     }
 
     default:

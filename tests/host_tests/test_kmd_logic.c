@@ -11,6 +11,7 @@
 #include "adapter.h"
 #include "sim.h"
 #include "ccc.h"
+#include "gfxinit.h"
 
 #include <stdlib.h>
 
@@ -123,25 +124,26 @@ static void TestPm4Decode(void)
 
     TEST_BEGIN("[1] PM4 decoder");
 
-    // 构造一段混合命令流（包头低 16 位格式：0xC0000000 | (count-1)<<16 |
-    // opcode<<8，count 含包头 dword）：
-    //   type-3 NOP(0x10)：包头 + 1 数据 dword（count=2）
+    // 构造一段混合命令流（type-3/0 包头 count 字段 = 包体 dword 数 - 1，
+    // 即包总长 = count + 2；M3.4a 对照 Linux 内核 r600_cs.c 解析器修正）：
+    //   type-3 NOP(0x10)：包头 + 1 包体（count 字段=0）
     //   type-2 filler
-    //   type-3 INDIRECT_BUFFER(0x32)：包头 + 3 数据 dword（count=4）
-    //   type-0 寄存器写：包头 + 2 数据 dword（count=3）
-    //   type-3 未知 opcode 0x77：仅包头（count=1）
+    //   type-3 INDIRECT_BUFFER(0x32)：包头 + 3 包体（count 字段=2）
+    //   type-0 寄存器写：包头 + 2 数据（count 字段=1）
+    //   type-3 未知 opcode 0x77：包头 + 1 包体（count 字段=0）
     memset(buf, 0, sizeof(buf));
-    buf[n++] = 0xC0000000u | (1u << 16) | (0x10u << 8);   // NOP，count=2
-    buf[n++] = 0xDEADBEEF;                                // NOP 数据 dword
+    buf[n++] = 0xC0000000u | (0u << 16) | (0x10u << 8);   // NOP，count 字段=0
+    buf[n++] = 0xDEADBEEF;                                // NOP 包体 dword
     buf[n++] = 0x80000000u;                               // type-2 filler
-    buf[n++] = 0xC0000000u | (3u << 16) | (0x32u << 8);   // INDIRECT_BUFFER
+    buf[n++] = 0xC0000000u | (2u << 16) | (0x32u << 8);   // INDIRECT_BUFFER
     buf[n++] = 0x11110000;                                // base lo
     buf[n++] = 0x00000002;                                // base hi
     buf[n++] = 512;                                       // size (dwords)
-    buf[n++] = 0x00000000u | (2u << 16) | (0x42u << 8);   // type-0，count=3（位8-15=寄存器索引 0x42）
+    buf[n++] = 0x00000000u | (1u << 16) | (0x42u << 8);   // type-0，count 字段=1（位8-15=寄存器索引 0x42）
     buf[n++] = 0x00000001;                                // 数据 dword 1
     buf[n++] = 0x00000002;                                // 数据 dword 2
-    buf[n++] = 0xC0000000u | (0u << 16) | (0x77u << 8);   // 未知 opcode，count=1
+    buf[n++] = 0xC0000000u | (0u << 16) | (0x77u << 8);   // 未知 opcode，count 字段=0
+    buf[n++] = 0x12345678;                                // 其包体 dword
 
     MakeAdapter(&a, 0x1002, 0x5046);
     CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
@@ -168,14 +170,14 @@ static void TestPm4Decode(void)
     RokSimShutdown(&a);
     CHECK(a.SimRegisterSpace == NULL);
 
-    // 跨界残包：INDIRECT_BUFFER 声明 4 dword 包体但缓冲只有包头 —— 必须
-    // 安全终止且不越界读（ASan 在 CI 里兜底）。
+    // 跨界残包：INDIRECT_BUFFER 声明总长 4 dword（包头+3 包体）但缓冲只有
+    // 包头 + 1 dword —— 必须安全终止且不越界读（ASan 在 CI 里兜底）。
     TEST_BEGIN("[1b] PM4 truncated packet (memory safety)");
     MakeAdapter(&a, 0x1002, 0x5046);
     CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
     {
         UINT32 trunc[2];
-        trunc[0] = 0xC0000000u | (3u << 16) | (0x32u << 8);
+        trunc[0] = 0xC0000000u | (2u << 16) | (0x32u << 8);
         trunc[1] = 0x12345678;
         RokSimObserveDma(&a, trunc, sizeof(trunc));
         CHECK(a.SimStats.UnknownOpcodes == 1);  // 残包计入 unknown 后终止
@@ -385,6 +387,225 @@ static void TestSimDecision(void)
     CHECK(a.SimulationMode == FALSE);
 }
 
+// ==================================================================
+// [5] ring 数学 + PM4 构造（ring.c，M3.4a）
+// ==================================================================
+
+static void TestRingMath(void)
+{
+    ROK_RING r;
+    ROK_U32 dummy[16];      // 16 dword 迷你环
+    ULONG i;
+
+    TEST_BEGIN("[5a] ring size math (Linux r600_ring_init semantics)");
+    CHECK(RokRingBufszFromBytes(32 * 1024) == 12);
+    CHECK(RokRingDwordsFromBufsz(12) == 8192);
+    CHECK(RokRingBytesFromBufsz(12) == 32768);
+    CHECK(RokRingBufszFromBytes(1024 * 1024) == 17);   // Linux 默认 1MB ring
+    CHECK(RokRingDwordsFromBufsz(17) == 262144);
+    CHECK(RokRingBytesFromBufsz(17) == 1024 * 1024);
+    CHECK(RokRingBufszFromBytes(16 * 1024) == 11);
+    // 微码期哑环：RB_BUFSZ(3) = 64 字节（r600_cp_load_microcode 同款）。
+    CHECK(RokRingBytesFromBufsz(3) == 64);
+    CHECK(RokRingDwordsFromBufsz(3) == 16);
+
+    TEST_BEGIN("[5b] PM4 type-3 header encoding (count = body-1)");
+    // 对照 Linux：SET_CONFIG_REG count=1+2 包体；ME_INIT count=5+6 包体；
+    // 单 dword NOP 0xC0001000 = count 字段 0 + 1 包体。
+    CHECK(RokPm4Type3(0x10, 1) == 0xC0001000u);
+    CHECK(RokPm4Type3(0x44, 6) == (0xC0000000u | (5u << 16) | (0x44u << 8)));
+    CHECK(RokPm4Type3(0x68, 2) == (0xC0000000u | (1u << 16) | (0x68u << 8)));
+    CHECK(RokPm4Type3(0x32, 3) == (0xC0000000u | (2u << 16) | (0x32u << 8)));
+
+    TEST_BEGIN("[5c] ring write + wrap");
+    memset(dummy, 0, sizeof(dummy));
+    memset(&r, 0, sizeof(r));
+    r.CpuVa = dummy;
+    r.SizeDwords = 16;
+    for (i = 0; i < 20; i++)
+    {
+        RokRingWriteU32(&r, i + 1);
+    }
+    CHECK(r.WptrTotal == 20);
+    CHECK(r.WptrDwords == 4);                     // 20 % 16
+    CHECK(dummy[15] == 16);
+    CHECK(dummy[0] == 17);                        // 回绕覆盖
+    CHECK(dummy[3] == 20);
+    // NULL 安全：无 CpuVa / 无环时零副作用。
+    RokRingWriteU32(NULL, 0xDEADBEEF);
+    r.CpuVa = NULL;
+    RokRingWriteU32(&r, 0xDEADBEEF);
+    CHECK(r.WptrTotal == 20);
+
+    TEST_BEGIN("[5d] ME_INIT packet (evergreen_cp_start)");
+    memset(dummy, 0, sizeof(dummy));
+    memset(&r, 0, sizeof(r));
+    r.CpuVa = dummy;
+    r.SizeDwords = 16;
+    RokRingWriteMeInitialize(&r, 8);
+    CHECK(dummy[0] == RokPm4Type3(0x44, 6));
+    CHECK(dummy[1] == 0x1);
+    CHECK(dummy[2] == 0x0);
+    CHECK(dummy[3] == 0x7);                       // max_hw_contexts - 1
+    CHECK(dummy[4] == 0x00010000u);               // DEVICE_ID(1)
+    CHECK(dummy[5] == 0);
+    CHECK(dummy[6] == 0);
+    CHECK(r.WptrDwords == 7);
+
+    TEST_BEGIN("[5e] SET_CONFIG_REG packet + window guard");
+    RokRingWriteSetConfigReg(&r, 0x8518, 0xDEADBEEF);   // SCRATCH_REG6
+    CHECK(dummy[7] == RokPm4Type3(0x68, 2));
+    CHECK(dummy[8] == ((0x8518u - 0x8000u) >> 2));      // = 0x146
+    CHECK(dummy[9] == 0xDEADBEEF);
+    CHECK(r.WptrDwords == 10);
+    {   // config 窗口外寄存器拒绝编码（0x7000 < 0x8000）。
+        ULONG before = r.WptrDwords;
+        RokRingWriteSetConfigReg(&r, 0x7000, 1);
+        CHECK(r.WptrDwords == before);
+    }
+}
+
+// ==================================================================
+// [6] 寄存器访问 sim 路径 + 只读状态快照（gfxinit.c）
+// ==================================================================
+
+static void TestRegAccessAndStatus(void)
+{
+    ROK_ADAPTER a;
+    ROK_ESC_HW_STATUS_OUT hw;
+
+    TEST_BEGIN("[6a] RokRegRead/Write32 — sim register space");
+    MakeAdapter(&a, 0x1002, 0x5046);
+    CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
+    CHECK(a.SimulationMode == TRUE);
+
+    RokRegWrite32(&a, 0x5428, 0x40000);           // CONFIG_MEMSIZE = 256MB(KB)
+    CHECK(RokRegRead32(&a, 0x5428) == 0x40000);
+    RokRegWrite32(&a, 0x8010, 0x8000001Fu);       // GRBM_STATUS
+    CHECK(RokRegRead32(&a, 0x8010) == 0x8000001Fu);
+    // 越界安全：64KB 窗口外读写零副作用。
+    CHECK(RokRegRead32(&a, 0xFFF0) == 0);
+    RokRegWrite32(&a, 0xFFF0, 0x12345678);        // 不得崩溃/不得写
+    // NULL 适配器 / 真实模式无 MMIO：零副作用。
+    CHECK(RokRegRead32(NULL, 0x5428) == 0);
+    RokRegWrite32(NULL, 0x5428, 1);
+
+    TEST_BEGIN("[6b] RokGfxProbeStatus — sim snapshot");
+    {
+        // fbLoc = (end>>24)<<16 | (start>>24) = (0x90<<16)|0x80 = 0x00900080。
+        ROK_U32 fbLoc = (0x90u << 16) | 0x80u;
+        RokRegWrite32(&a, 0x2180, fbLoc);         // MC_VM_FB_LOCATION 预置
+        CHECK(RokGfxProbeStatus(&a, &hw) == STATUS_SUCCESS);
+        CHECK(hw.MmioSource == ROK_HW_SRC_SIM);
+        CHECK(hw.MmioLength == 0x10000);
+        CHECK(hw.ConfigMemsize == 0x40000);
+        CHECK(hw.McVmFbLocation == fbLoc);
+        CHECK(hw.FbBaseBytes == 0x80000000u);
+        CHECK(hw.GrbmStatus == 0x8000001Fu);
+        CHECK(hw.RingReady == 0);                 // 未初始化 ring
+        CHECK(hw.UcodeLoaded == 0);
+        CHECK(hw.RingTestValue == 0);
+    }
+    RokSimShutdown(&a);
+
+    TEST_BEGIN("[6c] RokGfxProbeStatus — real mode without MMIO");
+    MakeAdapter(&a, 0x1002, 0x6760);              // Seymour 实卡 ID
+    SetHypervisor(FALSE, HV_NONE);
+    CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
+    CHECK(a.SimulationMode == FALSE);
+    CHECK(RokGfxProbeStatus(&a, &hw) == STATUS_SUCCESS);
+    CHECK(hw.MmioSource == ROK_HW_SRC_NONE);
+    CHECK(hw.ConfigMemsize == 0);                 // 无 MMIO → 0，不假读
+    CHECK(hw.RingReady == 0);
+
+    TEST_BEGIN("[6d] RokGfxProbeStatus — NULL guard");
+    CHECK(RokGfxProbeStatus(NULL, &hw) == STATUS_INVALID_PARAMETER);
+    MakeAdapter(&a, 0x1002, 0x6760);
+    CHECK(RokGfxProbeStatus(&a, NULL) == STATUS_INVALID_PARAMETER);
+}
+
+// ==================================================================
+// [7] ring 演练：真序列 + sim 寄存器落点（gfxinit.c，M3.4a 核心）
+// ==================================================================
+
+static void TestRingRehearse(void)
+{
+    ROK_ADAPTER a;
+    ROK_ESC_HW_STATUS_OUT hw;
+
+    TEST_BEGIN("[7a] rehearse full evergreen startup sequence");
+    MakeAdapter(&a, 0x1002, 0x5046);              // sim 设备（演练只走 sim 空间）
+    CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
+    // MC_VM_FB_LOCATION 预置（真实模式由 VBIOS/前驱动配置；演练由测试预置）：
+    // start=0x80000000，end=0x90000000 → 原值 0x00900080。
+    RokRegWrite32(&a, 0x2180, (0x90u << 16) | 0x80u);
+
+    CHECK(RokRingHardwareInit(&a, TRUE) == STATUS_SUCCESS);
+
+    // 微码与 ring 状态标志。
+    CHECK(a.UcodeLoaded == TRUE);
+    CHECK(a.Ring.HwProgrammed == TRUE);
+    CHECK(a.Ring.Ready == TRUE);
+    CHECK(a.Ring.SizeDwords == 8192);
+    CHECK(a.Ring.BufszLog2 == 12);
+    CHECK(a.Ring.GpuAddr == 0x80800000ULL);       // 演练 fbBase 0x80000000 + 8MB
+
+    // 寄存器终值逐一核对（evergreen_cp_resume + cp_start 移植面）。
+    CHECK(RokRegRead32(&a, 0x86D8) == 0xFF);      // CP_ME_CNTL unhalt（最后写入）
+    CHECK(RokRegRead32(&a, 0x8020) == 0);         // GRBM_SOFT_RESET 已清零
+    CHECK(RokRegRead32(&a, 0xC100) == 0x00808000u); // CP_RB_BASE = 0x80800000>>8
+    {
+        ROK_U32 cntl = RokRegRead32(&a, 0xC104);
+        CHECK((cntl & 0x1F) == 12);               // RB_BUFSZ
+        CHECK(((cntl >> 8) & 0x3F) == 9);         // RB_BLKSZ
+        CHECK((cntl & (1u << 27)) != 0);          // RB_NO_UPDATE
+        CHECK((cntl & (1u << 31)) == 0);          // RPTR_WR_ENA 已撤
+    }
+    CHECK(RokRegRead32(&a, 0x8540) == 0);         // SCRATCH_UMSK = 0
+    CHECK(RokRegRead32(&a, 0xC114) == 10);        // CP_RB_WPTR = 7(ME_INIT)+3(测试包)
+    CHECK(RokRegRead32(&a, 0x8518) == 0xDEADBEEFu); // SCRATCH_REG6 = ring test 哨兵
+    CHECK(a.RingTestValue == 0xDEADBEEFu);
+    CHECK(a.RingTestRetries == 0);                // 演练首轮命中
+
+    // ring 内存内容：dword0-6 = ME_INIT，dword7-9 = SET_CONFIG_REG 测试包。
+    CHECK(a.Ring.CpuVa[0] == RokPm4Type3(0x44, 6));
+    CHECK(a.Ring.CpuVa[3] == 0x7);
+    CHECK(a.Ring.CpuVa[7] == RokPm4Type3(0x68, 2));
+    CHECK(a.Ring.CpuVa[8] == 0x146);
+    CHECK(a.Ring.CpuVa[9] == 0xDEADBEEFu);
+
+    TEST_BEGIN("[7b] probe reflects rehearsed ring");
+    CHECK(RokGfxProbeStatus(&a, &hw) == STATUS_SUCCESS);
+    CHECK(hw.RingReady == 1);
+    CHECK(hw.UcodeLoaded == 1);
+    CHECK(hw.RingGpuAddrLo == 0x80800000u);
+    CHECK(hw.RingSizeDwords == 8192);
+    CHECK(hw.CpRbBase == 0x00808000u);
+    CHECK(hw.RingTestValue == 0xDEADBEEFu);
+
+    TEST_BEGIN("[7c] stop halts CP and releases ring");
+    RokRingHardwareStop(&a);
+    CHECK(RokRegRead32(&a, 0x86D8) ==
+          ((1u << 28) | (1u << 26)));             // ME_HALT | PFP_HALT
+    CHECK(a.Ring.CpuVa == NULL);
+    CHECK(a.Ring.HwProgrammed == FALSE);
+    CHECK(a.RingWindowPool == FALSE);
+    RokSimShutdown(&a);
+
+    TEST_BEGIN("[7d] gate conditions");
+    MakeAdapter(&a, 0x1002, 0x5046);
+    CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
+    CHECK(RokRingHardwareInit(&a, FALSE) == STATUS_NOT_SUPPORTED);  // sim 拒真实模式
+    RokSimShutdown(&a);
+    MakeAdapter(&a, 0x1002, 0x6760);              // 真实模式但无 BAR0
+    SetHypervisor(FALSE, HV_NONE);
+    CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
+    CHECK(RokRingHardwareInit(&a, FALSE) == STATUS_DEVICE_CONFIGURATION_ERROR);
+    CHECK(RokRingHardwareInit(NULL, FALSE) == STATUS_INVALID_PARAMETER);
+    CHECK(RokRingHardwareInit(&a, FALSE) == STATUS_DEVICE_CONFIGURATION_ERROR);
+    RokRingHardwareStop(&a);                      // 未初始化时零副作用
+}
+
 int main(void)
 {
     // 环境：接管 cpuid（与本沙箱是否在 KVM 里无关，用例自定状态）。
@@ -395,11 +616,15 @@ int main(void)
     printf("rokmd host unit tests — logic parity with kmd/src bytes\n");
     C_ASSERT(sizeof(ROK_CCC_SETTINGS) == 32);
     C_ASSERT(sizeof(ROK_SIM_STATS) == 284);   // 7×ULONG/UINT32 + 64×ULONG，见 sim.h
+    C_ASSERT(sizeof(ROK_ESC_HW_STATUS_OUT) == 128);
 
     TestPm4Decode();
     TestCccImport();
     TestCccSetGet();
     TestSimDecision();
+    TestRingMath();
+    TestRegAccessAndStatus();
+    TestRingRehearse();
 
     printf("\n==== host tests: %d checks, %d failed ====\n",
            g_total, g_failed);

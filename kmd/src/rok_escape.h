@@ -41,7 +41,7 @@ typedef uint64_t ROK_U64;
 #define ROK_ESCAPE_VERSION      1UL
 
 // Escape 类型（v1 查询面；M2.6 追加 SIM/CCC 为 6/7/8，M2.8 追加引擎状态为 9，
-// 均向后兼容：旧调用方不感知新增类型）。
+// M3.4a 追加硬件状态为 10，均向后兼容：旧调用方不感知新增类型）。
 typedef enum _ROK_ESCAPE_TYPE
 {
     ROK_ESC_TYPE_QUERY_VERSION   = 1,    // -> ROK_ESC_VERSION_OUT
@@ -53,6 +53,7 @@ typedef enum _ROK_ESCAPE_TYPE
     ROK_ESC_TYPE_CCC_GET_SETTINGS = 7,   // -> ROK_ESC_CCC_SETTINGS（M2.6，ccc.c）
     ROK_ESC_TYPE_CCC_SET_SETTINGS = 8,   // <- ROK_ESC_CCC_SETTINGS（M2.6，输入报文）
     ROK_ESC_TYPE_QUERY_ENGINE_STATUS = 9, // -> ROK_ESC_ENGINE_STATUS_OUT（M2.8）
+    ROK_ESC_TYPE_QUERY_HW_STATUS = 10,   // -> ROK_ESC_HW_STATUS_OUT（M3.4a）
 } ROK_ESCAPE_TYPE;
 
 // 能力位（ROK_ESC_CAPS_OUT.CapsMask）。
@@ -64,6 +65,7 @@ typedef enum _ROK_ESCAPE_TYPE
 #define ROK_CAP_VRAM_SEGMENT        0x00000400UL  // M3：VRAM 段可用
 #define ROK_CAP_SEGMENT_QUERY       0x00000800UL  // QUERY_SEGMENT_INFO 可用（v1.1）
 #define ROK_CAP_ENGINE_STATUS_QUERY 0x00001000UL  // M2.8：QUERY_ENGINE_STATUS 可用
+#define ROK_CAP_HW_STATUS_QUERY     0x00002000UL  // M3.4a：QUERY_HW_STATUS 可用
 
 // 段标志（ROK_ESC_SEGMENT_INFO_OUT.Flags）。
 #define ROK_SEG_FLAG_VRAM_POPULATED 0x00000001UL  // VramSizeBytes 已探测
@@ -180,6 +182,48 @@ typedef struct _ROK_ESC_ENGINE_STATUS_OUT
     ROK_U32 Reserved[2];            // 0
 } ROK_ESC_ENGINE_STATUS_OUT, *PROK_ESC_ENGINE_STATUS_OUT;
 
+// ---- 硬件状态快照（M3.4a；escape 查询 10，只读，KMD 侧 gfxinit.c 填充）----
+// 寄存器偏移见 kmd/src/regs_ts2.h（对照 Linux radeon r600d.h/evergreend.h）。
+// MMIO 不可达时各寄存器字段为 0，MmioSource 如实区分三态。
+// 结构必须 POD 且稳定：字段增删只能追加，两侧 C_ASSERT 防漂移。
+#define ROK_HW_SRC_NONE         0UL  // 无 MMIO（未映射）
+#define ROK_HW_SRC_REAL_MMIO    1UL  // 真实 BAR0 寄存器窗口
+#define ROK_HW_SRC_SIM          2UL  // 模拟寄存器空间（sim.c）
+
+typedef struct _ROK_ESC_HW_STATUS_OUT
+{
+    ROK_U32 MmioSource;         // ROK_HW_SRC_*
+    ROK_U32 MmioLength;         // 映射窗口字节数
+    ROK_U32 ConfigMemsize;      // CONFIG_MEMSIZE（0x5428，KB）
+    ROK_U32 McVmFbLocation;     // MC_VM_FB_LOCATION（0x2180 原值）
+    ROK_U32 FbBaseBytes;        // (McVmFbLocation & 0xFFFF) << 24
+    ROK_U32 McApertureLow;      // MC_VM_SYSTEM_APERTURE_LOW（0x2190）
+    ROK_U32 McApertureHigh;     // MC_VM_SYSTEM_APERTURE_HIGH（0x2194）
+    ROK_U32 SrbmStatus;         // SRBM_STATUS（0x0E50）
+    ROK_U32 SrbmStatus2;        // SRBM_STATUS2（0x0EC4）
+    ROK_U32 GrbmStatus;         // GRBM_STATUS（0x8010）
+    ROK_U32 GrbmStatus2;        // GRBM_STATUS2（0x8014）
+    ROK_U32 CpStalledStat1;     // CP_STALLED_STAT1（0x8674）
+    ROK_U32 CpStalledStat2;     // CP_STALLED_STAT2（0x8678）
+    ROK_U32 CpBusyStat;         // CP_BUSY_STAT（0x867C）
+    ROK_U32 CpStat;             // CP_STAT（0x8680）
+    ROK_U32 CpMeCntl;           // CP_ME_CNTL（0x86D8）
+    ROK_U32 CpRbBase;           // CP_RB_BASE（0xC100，原值 = 环地址>>8）
+    ROK_U32 CpRbCntl;           // CP_RB_CNTL（0xC104）
+    ROK_U32 CpRbRptr;           // CP_RB_RPTR（0x8700）
+    ROK_U32 CpRbWptr;           // CP_RB_WPTR（0xC114）
+    ROK_U32 ScratchUmsk;        // SCRATCH_UMSK（0x8540）
+    ROK_U32 ScratchReg6;        // SCRATCH_REG6（0x8518）
+    ROK_U32 ScratchReg7;        // SCRATCH_REG7（0x851C）
+    ROK_U32 RingReady;          // rokmd ring 状态：1 = ME_INIT+ring test 通过
+    ROK_U32 RingGpuAddrLo;      // rokmd 环总线地址低 32 位
+    ROK_U32 RingSizeDwords;     // rokmd 环容量（dword）
+    ROK_U32 RingTestRetries;    // ring test 轮询次数（0 = 首轮即过）
+    ROK_U32 RingTestValue;      // ring test 末次读到的 scratch 值
+    ROK_U32 UcodeLoaded;        // CP PFP/ME 微码已由 rokmd 写入
+    ROK_U32 Reserved[3];        // 0（总长对齐 128 字节）
+} ROK_ESC_HW_STATUS_OUT, *PROK_ESC_HW_STATUS_OUT;
+
 #if defined(_WIN32)
 C_ASSERT(sizeof(ROK_ESCAPE_HEADER) == 16);
 C_ASSERT(sizeof(ROK_ESC_VERSION_OUT) == 16);
@@ -190,6 +234,7 @@ C_ASSERT(sizeof(ROK_ESC_SEGMENT_INFO_OUT) == 32);
 C_ASSERT(sizeof(ROK_ESC_SIM_STATUS_OUT) == 296);
 C_ASSERT(sizeof(ROK_ESC_CCC_SETTINGS) == 32);
 C_ASSERT(sizeof(ROK_ESC_ENGINE_STATUS_OUT) == 32);
+C_ASSERT(sizeof(ROK_ESC_HW_STATUS_OUT) == 128);
 #endif
 
 // TeraScale 家族启发式（M3 用完整分发表替换）。

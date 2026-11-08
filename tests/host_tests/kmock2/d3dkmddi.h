@@ -25,10 +25,14 @@ typedef enum _DXGKDDI_WDDMVERSION {
 
 // ---- QueryAdapterInfo 类型 ----
 typedef enum _DXGK_QUERYADAPTERINFOTYPE {
+    DXGKQAITYPE_UMDRIVERPRIVATE = 0,
     DXGKQAITYPE_DRIVERCAPS      = 15,
     DXGKQAITYPE_QUERYSEGMENT3   = 23,
     DXGKQAITYPE_QUERYSEGMENT4   = 36,
-    DXGKQAITYPE_GPUMMUCAPS      = 37
+    DXGKQAITYPE_GPUMMUCAPS      = 37,
+    DXGKQAITYPE_NUMPOWERCOMPONENTS          = 6,
+    DXGKQAITYPE_SEGMENTMEMORYSTATE          = 12,
+    DXGKQAITYPE_DISPLAY_DRIVERCAPS_EXTENSION = 16
 } DXGK_QUERYADAPTERINFOTYPE;
 
 // ---- OpenAllocation 的句柄翻译回调参数 ----
@@ -332,12 +336,54 @@ typedef struct _DXGKARG_QUERYDEPENDENTENGINEGROUP {
 
 typedef struct _DXGKARG_QUERYENGINESTATUS {
     ULONG NodeOrdinal;
+    ULONG EngineOrdinal;
     struct {
         ULONG Responsive:1;
         ULONG Reserved:31;
     } EngineStatus;
 } DXGKARG_QUERYENGINESTATUS;
 #define INOUT_PDXGKARG_QUERYENGINESTATUS    DXGKARG_QUERYENGINESTATUS*
+
+// ---- M2.8 结构补齐（形状对照 WDK 26100 d3dkmddi.h）----
+typedef struct _DXGK_MEMORYRANGE {
+    UINT64 SegmentOffset;
+    UINT64 SizeInBytes;
+} DXGK_MEMORYRANGE;
+
+typedef struct _DXGK_QUERYSEGMENTMEMORYSTATE {
+    WORD            DriverSegmentId;
+    WORD            PhysicalAdapterIndex;
+    UINT            NumInvalidMemoryRanges;
+    DXGK_MEMORYRANGE *pMemoryRanges;
+} DXGK_QUERYSEGMENTMEMORYSTATE, *INOUT_PDXGKARG_QUERYSEGMENTMEMORYSTATE_STUB;
+
+typedef struct _DXGK_DISPLAY_DRIVERCAPS_EXTENSION {
+    union {
+        struct {
+            UINT SecureDisplaySupport   : 1;
+            UINT VirtualModeSupport     : 1;
+            UINT Reserved               : 29;
+            UINT NonSpecificPrimarySupport : 1;
+        };
+        UINT Value;
+    };
+} DXGK_DISPLAY_DRIVERCAPS_EXTENSION, *PDXGK_DISPLAY_DRIVERCAPS_EXTENSION;
+#define INOUT_PDXGK_QUERYSEGMENTMEMORYSTATE  DXGK_QUERYSEGMENTMEMORYSTATE*
+
+#ifndef _KMOCK2_GUID_DEFINED
+#define _KMOCK2_GUID_DEFINED
+typedef struct _GUID { ULONG Data1; WORD Data2; WORD Data3; UCHAR Data4[8]; } GUID;
+#endif
+typedef const GUID *LPCGUID;
+typedef NTSTATUS (*DXGKDDI_SETVIDPNSOURCEADDRESSWITHMPO)(HANDLE, CONST void*);
+typedef NTSTATUS (*DXGKDDI_LINKDEVICE)(const PVOID, const PVOID, struct _LINKED_DEVICE*);
+typedef NTSTATUS (*DXGKDDI_SETPOWERCOMPONENTFSTATE)(HANDLE, UINT, UINT);
+typedef NTSTATUS (*DXGKDDI_POWERRUNTIMECONTROLREQUEST)(HANDLE, LPCGUID,
+                                                       void*, SIZE_T,
+                                                       void*, SIZE_T, SIZE_T*);
+typedef NTSTATUS (*DXGKDDI_SETPOWERSTATE_PSTATE)(HANDLE, UINT, UINT);
+#define IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY \
+    CONST void*
 
 typedef struct _DXGKARG_RESETENGINE {
     ULONGLONG LastAbortedFenceId;
@@ -610,6 +656,11 @@ typedef struct _DRIVER_INITIALIZATION_DATA {
     DXGKDDI_UNMAPCPUHOSTAPERTURE            DxgkDdiUnmapCpuHostAperture;
     DXGKDDI_CHECKMULTIPLANEOVERLAYSUPPORT2  DxgkDdiCheckMultiPlaneOverlaySupport2;
     DXGKDDI_SETVIDPNSOURCEADDRESSWITHMPO2   DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay2;
+    DXGKDDI_LINKDEVICE                      DxgkDdiLinkDevice;
+    DXGKDDI_SETPOWERCOMPONENTFSTATE         DxgkDdiSetPowerComponentFState;
+    DXGKDDI_POWERRUNTIMECONTROLREQUEST      DxgkDdiPowerRuntimeControlRequest;
+    DXGKDDI_SETPOWERSTATE_PSTATE            DxgkDdiSetPowerPState;
+    DXGKDDI_SETVIDPNSOURCEADDRESSWITHMPO    DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay;
     DXGKDDI_POWERRUNTIMESETDEVICEHANDLE     DxgkDdiPowerRuntimeSetDeviceHandle;
     DXGKDDI_SETSTABLEPOWERSTATE             DxgkDdiSetStablePowerState;
     DXGKDDI_SETVIDEOPROTECTEDREGION         DxgkDdiSetVideoProtectedRegion;

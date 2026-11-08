@@ -340,6 +340,119 @@ static void RokProbeHypervisor(void)
 }
 
 // ---------------------------------------------------------------------------
+// [1.7] PCI 内存资源（cfgmgr32，用户态即可，无需任何驱动）
+//       M3.4a：核对 TeraScale 卡的标准 BAR 形态 ——
+//         BAR0 = VRAM 孔径（>16MB，prefetchable），
+//         BAR2 = MMIO 寄存器窗口（256KB~512KB）。
+//       Linux radeon 对 pre-BONAIRE 用 BAR2 做寄存器、BAR0 做显存孔径
+//       （radeon_device.c: pci_resource_start(pdev, 2)）。
+// ---------------------------------------------------------------------------
+#include <cfgmgr32.h>
+
+static void RokProbePciResources(void)
+{
+    HDEVINFO h;
+    SP_DEVINFO_DATA di;
+    DWORD idx = 0;
+
+    printf("\n================================================================\n");
+    printf(" [1.7] PCI memory resources (cfgmgr32 ALLOC log conf)\n");
+    printf("================================================================\n");
+
+    h = SetupDiGetClassDevsW(&GUID_DEVCLASS_DISPLAY, NULL, NULL, DIGCF_PRESENT);
+    if (h == INVALID_HANDLE_VALUE)
+    {
+        printf("  SetupDiGetClassDevsW failed\n");
+        return;
+    }
+
+    di.cbSize = sizeof(di);
+    while (SetupDiEnumDeviceInfo(h, idx, &di))
+    {
+        WCHAR hwid[256];
+        char locA[160];
+        DWORD type = 0, need = 0;
+        CONFIGRET cr;
+        LOG_CONF lc = 0;
+        RES_DES rd = 0, rdNext = 0;
+        ULONG rtype = 0;
+        int nMem = 0;
+        unsigned long long mmioCand = 0, mmioCandLen = 0;
+        unsigned long long aperCand = 0, aperCandLen = 0;
+
+        idx++;
+        if (!SetupDiGetDeviceRegistryPropertyW(h, &di, SPDRP_HARDWAREID,
+                                               &type, (PBYTE)hwid,
+                                               sizeof(hwid), &need))
+            continue;
+        if (wcsstr(hwid, L"VEN_1002") == NULL)
+            continue;
+
+        locA[0] = '\0';
+        SetupDiGetDeviceRegistryPropertyA(h, &di, SPDRP_LOCATION_INFORMATION,
+                                          &type, (PBYTE)locA, sizeof(locA), &need);
+        printf("  ---- AMD display device #%lu  %ls\n      location : %s\n",
+               (unsigned long)(idx - 1), hwid, locA[0] ? locA : "(unknown)");
+
+        cr = CM_Get_First_Log_Conf(&lc, di.DevInst, ALLOC_LOG_CONF);
+        if (cr != CR_SUCCESS)
+        {
+            printf("    (no allocated log conf, cr=0x%lX)\n", (unsigned long)cr);
+            continue;
+        }
+
+        rd = (RES_DES)lc;
+        while (CM_Get_Next_Res_Des(&rdNext, rd, ResType_Mem, &rtype, 0) == CR_SUCCESS)
+        {
+            if (rd != (RES_DES)lc)
+                CM_Free_Res_Des_Handle(rd);
+            rd = rdNext;
+            {
+                MEM_DES mem;
+
+                if (CM_Get_Res_Des_Data(rd, &mem, sizeof(mem), 0) == CR_SUCCESS)
+                {
+                    unsigned long long base = (unsigned long long)mem.MD_Alloc_Base;
+                    unsigned long long len = (unsigned long long)
+                        (mem.MD_Alloc_End - mem.MD_Alloc_Base + 1);
+                    const char *kind;
+
+                    if (len > (16ULL << 20))       kind = "VRAM aperture candidate";
+                    else if (len >= (64 << 10))    kind = "MMIO register candidate";
+                    else                           kind = "(small window)";
+                    printf("    MEM[%d] base=0x%016llX len=0x%llX (%llu KB) flags=0x%08lX  <- %s\n",
+                           nMem, base, len, len >> 10, (unsigned long)mem.MD_Flags, kind);
+
+                    if (len > (16ULL << 20))
+                    {
+                        if (len > aperCandLen) { aperCand = base; aperCandLen = len; }
+                    }
+                    else if (len >= (64 << 10) && len <= (16ULL << 20))
+                    {
+                        if (mmioCandLen == 0 || len < mmioCandLen)
+                        { mmioCand = base; mmioCandLen = len; }
+                    }
+                    nMem++;
+                }
+            }
+        }
+        if (rd != 0 && rd != (RES_DES)lc)
+            CM_Free_Res_Des_Handle(rd);
+        CM_Free_Log_Conf_Handle(lc);
+
+        if (nMem > 0)
+        {
+            printf("    -> MMIO window pick : 0x%016llX (%llu KB)\n",
+                   mmioCand, mmioCandLen >> 10);
+            printf("    -> aperture pick   : 0x%016llX (%llu MB)\n",
+                   aperCand, aperCandLen >> 20);
+        }
+    }
+
+    SetupDiDestroyDeviceInfoList(h);
+}
+
+// ---------------------------------------------------------------------------
 // [2] WDDM 适配器（D3DKMT）
 // ---------------------------------------------------------------------------
 static void RokProbeD3DKMTAdapters(void)
@@ -578,6 +691,7 @@ typedef union _ROK_ESC_OUT_BUF {
     ROK_ESC_SIM_STATUS_OUT    sim;
     ROK_ESC_CCC_SETTINGS      ccc;
     ROK_ESC_ENGINE_STATUS_OUT engine;
+    ROK_ESC_HW_STATUS_OUT     hw;
     unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 296];  // 最大 = SIM_STATUS(296)
 } ROK_ESC_OUT_BUF;
 
@@ -826,6 +940,55 @@ static void RokProbeRokmdEscapeChannel(void)
                    (unsigned)out.engine.Responsive);
         }
 
+        // [4.9] QUERY_HW_STATUS（M3.4a：寄存器/CP 状态只读快照）
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_HW_STATUS,
+                   &out, sizeof(out.hw), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            const char *src = out.hw.MmioSource == ROK_HW_SRC_REAL_MMIO ? "real-BAR0"
+                            : out.hw.MmioSource == ROK_HW_SRC_SIM       ? "sim"
+                            :                                             "none";
+            unsigned int bufsz = out.hw.CpRbCntl & 0x1F;
+            unsigned int blksz = (out.hw.CpRbCntl >> 8) & 0x3F;
+
+            printf("  QUERY_HW    : OK  mmio=%s len=%u\n", src, out.hw.MmioLength);
+            if (out.hw.MmioSource != ROK_HW_SRC_NONE)
+            {
+                printf("                VRAM=%uMB (CONFIG_MEMSIZE=0x%X KB)  "
+                       "FB base=0x%08X (MC_VM_FB_LOCATION=0x%08X)\n",
+                       out.hw.ConfigMemsize / 1024, out.hw.ConfigMemsize,
+                       out.hw.FbBaseBytes, out.hw.McVmFbLocation);
+                printf("                GRBM_STATUS=0x%08X%s  SRBM=0x%08X  "
+                       "CP_STAT=0x%08X CP_BUSY=0x%08X\n",
+                       out.hw.GrbmStatus,
+                       (out.hw.GrbmStatus & 0x80000000u) ? " GUI-ACTIVE" : "",
+                       out.hw.SrbmStatus, out.hw.CpStat, out.hw.CpBusyStat);
+                printf("                CP_ME_CNTL=0x%08X (%s)  "
+                       "ring: base=0x%08X cntl=0x%08X (BUFSZ=%u -> %u dwords, BLKSZ=%u)\n",
+                       out.hw.CpMeCntl,
+                       (out.hw.CpMeCntl & ((1u << 28) | (1u << 26)))
+                           ? "halted" : "running",
+                       out.hw.CpRbBase, out.hw.CpRbCntl, bufsz,
+                       bufsz < 20 ? (2u << bufsz) : 0u, blksz);
+                printf("                rptr=%u wptr=%u scratch6=0x%08X umsk=0x%08X\n",
+                       out.hw.CpRbRptr, out.hw.CpRbWptr,
+                       out.hw.ScratchReg6, out.hw.ScratchUmsk);
+                printf("                rokmd ring: ready=%u gpuAddr=0x%08X size=%u "
+                       "test=%s (retries=%u) ucode=%u\n",
+                       out.hw.RingReady, out.hw.RingGpuAddrLo,
+                       out.hw.RingSizeDwords,
+                       out.hw.RingTestValue == 0xDEADBEEFu ? "PASS" : "FAIL",
+                       out.hw.RingTestRetries, out.hw.UcodeLoaded);
+                if (out.hw.RingReady && out.hw.RingTestValue == 0xDEADBEEFu)
+                    printf("                -> M3.4a ring bring-up: PASS (CP fetches from ring)\n");
+            }
+        }
+        else
+        {
+            printf("  QUERY_HW    : status=0x%08lX (需 rokmd v0.2.3+；非 rokmd 适配器属预期)\n",
+                   (unsigned long)st);
+        }
+
         if (hDevice != 0 && pDestroyDevice != NULL)
         {
             ROK_D3DKMT_DESTROYDEVICE dd;
@@ -1019,10 +1182,12 @@ int main(int argc, char **argv)
     SetConsoleCP(CP_UTF8);
 
     printf("gpu_probe — radeon-windows 图形栈探测工具\n");
+    printf("版本：v0.2.3-alpha（M3.4a：PCI 资源 + 硬件状态通道）\n");
     printf("目标：弄清 Windows 图形栈当前状态（PCI / WDDM / Vulkan / rokmd escape）\n");
 
     RokProbePciDisplayDevices();
     RokProbeHypervisor();
+    RokProbePciResources();
     RokProbeD3DKMTAdapters();
     RokProbeVulkanIcdRegistry();
     RokProbeVulkan();

@@ -150,6 +150,19 @@ RokSimRegReadUlong(
     return ok;
 }
 
+// 共享入口（sim.h 声明）：gfxinit.c 的 EnableRing 开关复用同一路径，
+// mock 注册表因此天然覆盖两条消费方。
+BOOLEAN
+RokRegReadUlongValue(
+    _In_ PUNICODE_STRING RootPath,
+    _In_opt_ PCWSTR SubKey,
+    _In_ PCWSTR ValueName,
+    _Out_ PULONG OutValue
+    )
+{
+    return RokSimRegReadUlong(RootPath, SubKey, ValueName, OutValue);
+}
+
 // ------------------------------------------------------------------
 // 初始化 / 关闭
 // ------------------------------------------------------------------
@@ -287,7 +300,8 @@ RokSimOpcodeName(
     switch (Opcode)
     {
     case 0x10: return L"NOP";
-    case 0x11: return L"INDIRECT_BUFFER_OFFSET";
+    case 0x11: return L"SET_BASE";
+    case 0x12: return L"CLEAR_STATE";
     case 0x17: return L"INDIRECT_BUFFER_END";
     case 0x19: return L"INDIRECT_BUFFER_CPLT";
     case 0x26: return L"WAIT_REG_MEM";
@@ -295,10 +309,11 @@ RokSimOpcodeName(
     case 0x32: return L"INDIRECT_BUFFER";
     case 0x33: return L"INDIRECT_BUFFER_CONST";
     case 0x43: return L"SURFACE_SYNC";
+    case 0x44: return L"ME_INITIALIZE";
     case 0x45: return L"COND_WRITE";
     case 0x46: return L"EVENT_WRITE";
     case 0x47: return L"EVENT_WRITE_EOP";
-    case 0x68: return L"SET_RESOURCE";
+    case 0x68: return L"SET_CONFIG_REG";
     case 0x69: return L"SET_CONTEXT_REG";
     case 0x36: return L"DRAW_INDEX_AUTO";
     default:   return NULL;
@@ -340,9 +355,14 @@ RokSimObserveDma(
 
         if ((word & 0xC0000000) == 0xC0000000)
         {
-            // type-3：包头 = 0xC0000000 | (count-1)<<16 | opcode<<8
+            // type-3：包头 = 0xC0000000 | (count-1)<<16 | opcode<<8。
+            // count 字段 = 包体 dword 数 - 1（M3.4a 对照 Linux 内核
+            // radeon_cs.c radeon_cs_packet_parse 的越界判定
+            // “count + 1 + idx >= length → 报错” 钉死：包总长 =
+            // count + 2 = 包头 + (count+1) 个包体 dword；旧实现
+            // 少算 1 dword，与真实 CP 取指不符，本版修正）。
             UINT32 opcode = (word >> 8) & 0xFF;
-            UINT32 body = ((word >> 16) & 0x3FFF) + 1;  // 含包头的 dword 数
+            UINT32 body = ((word >> 16) & 0x3FFF) + 2;  // 含包头的总 dword 数
             UINT32 end = (UINT32)(i + body);
 
             if (end > count)
@@ -357,7 +377,9 @@ RokSimObserveDma(
 
             if (opcode == 0x32 || opcode == 0x33)
             {
-                // INDIRECT_BUFFER：dword0/1 = 基址，dword2 = 大小（dword）。
+                // INDIRECT_BUFFER：包体 dword0/1 = 基址，dword2 = 大小（dword）。
+                // （Linux evergreen_ring_ib_execute：header count=2 + 3 包体，
+                //   总长 4 —— 即 count+2。）
                 if (body >= 4)
                 {
                     st->LastIndirectBaseLo = dw[i + 1];
@@ -389,8 +411,9 @@ RokSimObserveDma(
 
         if ((word & 0xC0000000) == 0x00000000)
         {
-            // type-0 寄存器写包：包头 + count 个数据 dword。
-            UINT32 body = ((word >> 16) & 0x3FFF) + 1;
+            // type-0 寄存器写包：包头 + (count+1) 个数据 dword（与 type-3
+            // 同一 count 语义，r600_cs.c 同一解析器判定）。
+            UINT32 body = ((word >> 16) & 0x3FFF) + 2;
             UINT32 end = (UINT32)(i + body);
             if (end > count)
             {

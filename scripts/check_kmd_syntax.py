@@ -13,7 +13,7 @@ WDK 类型/宏后用 gcc -fsyntax-only 编译。被测内容：
 """
 import subprocess, sys, os
 
-REPO = "/home/z/my-project/radeon-windows"
+REPO = "/home/z/my-project"
 DDI_C = os.path.join(REPO, "kmd/src/ddi.c")
 src = open(DDI_C, encoding="utf-8").read()
 
@@ -310,6 +310,8 @@ NTSTATUS RokCccGetSettings(PROK_ADAPTER a, ROK_CCC_SETTINGS *s);
 NTSTATUS RokCccSetSettings(PROK_ADAPTER a, const ROK_CCC_SETTINGS *s);
 BOOLEAN RokSimEnabled(PROK_ADAPTER a);
 VOID RokSimObserveDma(PROK_ADAPTER a, CONST VOID *buf, UINT n);
+/* gfxinit.c（M3.4a）—— 提取块引用；完整类型面见 gfxinit.h */
+NTSTATUS RokGfxProbeStatus(PROK_ADAPTER a, PROK_ESC_HW_STATUS_OUT out);
 """
 
 BODY = r"""

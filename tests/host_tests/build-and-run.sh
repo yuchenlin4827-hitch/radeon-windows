@@ -19,7 +19,7 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "${SCRATCH}"' EXIT
 
 KMD_SRC="${REPO_ROOT}/kmd/src"
-FILES="adapter.h sim.h ccc.h ccc.c sim.c"
+FILES="adapter.h sim.h ccc.h ccc.c sim.c ring.h ring.c gfxinit.h gfxinit.c regs_ts2.h rok_escape.h evergreen_ucode.c"
 
 echo "[host-tests] repo = ${REPO_ROOT}"
 
@@ -41,7 +41,9 @@ command -v "${CC}" >/dev/null || CC=clang
     -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I kmock -I "${SCRATCH}" \
     -o "${SCRATCH}/test_kmd_logic" \
-    test_kmd_logic.c mock_registry.c "${SCRATCH}/ccc.c" "${SCRATCH}/sim.c"
+    test_kmd_logic.c mock_registry.c \
+    "${SCRATCH}/ccc.c" "${SCRATCH}/sim.c" \
+    "${SCRATCH}/ring.c" "${SCRATCH}/gfxinit.c" "${SCRATCH}/evergreen_ucode.c"
 
 # 4) 编译后再校验一次：确保编译过程没有副作用改动源文件。
 ( cd "${KMD_SRC}" && sha256sum ${FILES} ) > "${SCRATCH}/manifest.post"

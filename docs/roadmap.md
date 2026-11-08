@@ -112,6 +112,37 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
   [bringup-safety.md](bringup-safety.md)（render-only 接管唯一显示 GPU
   = 无头风险，虚拟机先行）。
 
+**M3.4a 进展（v0.2.3-alpha）** ✅（3.4 的"初始化+观测"半步）：
+
+- **CP 微码内嵌**：`kmd/src/evergreen_ucode.c`（`scripts/gen_ucode.py`
+  机械生成）——linux-firmware 的 `CAICOS_pfp.bin`（1120 dwords）+
+  `CAICOS_me.bin`（1376 dwords），覆盖 Seymour/Caicos（CHIP_CAICOS）。
+  TURKS_me 实测与 CAICOS_me 相同；TURKS_pfp 不同（Whistler/Turks 的
+  HD 6490M 路径 M3.4b 补）。
+- **Evergreen CP ring 编程序列**（`kmd/src/gfxinit.c`，逐条对照
+  evergreen.c 的 `evergreen_cp_load_microcode` / `evergreen_cp_resume` /
+  `evergreen_cp_start` + r600.c 的 `r600_ring_test`）：PFP/ME 微码写入 →
+  GRBM 软复位（CP|PA|SH|VGT|SPI|SX）→ CP_RB_BASE/CNTL/RPTR/WPTR 编程
+  （NO_UPDATE，rptr 从 MMIO 0x8700 轮询，绕开 writeback 依赖）→
+  ME_INIT 7 dwords → 解除停机（CP_ME_CNTL=0xFF）→ scratch 回环测试
+  （0xCAFEDEAD → SET_CONFIG_REG → 0xDEADBEEF）。
+- **默认关闭**：`<DriverKey>\Parameters\EnableRing = 1` 才执行；未开启时
+  对硬件零写入，WDDM 提交保持即时完成模型（零 TDR 风险）。真实模式
+  执行门槛：非 sim + BAR0 已映射 + TS2 家族 + 孔径存在 +
+  `MC_VM_FB_LOCATION` 非 0。
+- **观测通道**：escape v1 追加 `QUERY_HW_STATUS (type 10)`（只读快照 27 个
+  寄存器/状态字段，真实/模拟/无 MMIO 三态如实标注）；gpu_probe 新增
+  [1.7]（cfgmgr32 资源/BAR 形态，用户态即可）与 [4.9]（硬件状态）。
+- **PM4 count 语义修正**：sim.c 解码器与 ddi.c 注释对齐内核
+  `r600_cs.c` 解析器（包总长 = count 字段 + 2，包体 = count+1）——
+  旧实现少算 1 dword，M4 ICD 生成命令流前必须钉死此语义。
+- **主机端 176 项单测**：演练模式（`Rehearse=TRUE`）把完整启动序列打到
+  sim 寄存器空间并逐一断言终值（CP_RB_BASE/CNTL/ME_CNTL/SCRATCH_REG6
+  哨兵/ring 内存包内容），ASan/UBSan 兜底。
+- 已知边界（下步）：M3.4b 真实提交 + fence；M3.5 IH/RLC（BTC_rlc.bin）；
+  MC 微码（BTC_mc.bin）仅冷启动需评估；RING 在 VRAM 孔径内 8MB 偏移、
+  32KB 容量（BUFSZ=12）。
+
 ## M4 —— terakan 接自研 KMD ⬜
 
 **目标**：Vulkan ICD 不再依赖官方 Catalyst KMD，整个栈全开源。

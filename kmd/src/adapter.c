@@ -7,6 +7,8 @@
 //（MM_INDEX/MM_DATA 间接寻址、GRBM/CP）的前置条件。
 #include "precomp.h"
 #include "adapter.h"
+#include "gfxinit.h"
+#include "sim.h"
 
 // ------------------------------------------------------------------
 // PCI 标识与 MMIO
@@ -54,7 +56,9 @@ RokAdapterReadPciIds(
 }
 
 // 映射 BAR0（第一个 <=16MB 的 MMIO 内存资源）。
-// 更大的窗口（BAR2 VRAM aperture 256MB+）留待 M3 按段策略处理。
+// 更大的窗口（VRAM 孔径 256MB+）不在此映射，但记入 ApertureBase/Length
+//（M3.4a ring 布点用；Linux radeon 对 pre-BONAIRE 用 BAR2 做寄存器窗口、
+// BAR0 做显存孔径 —— 与 <=16MB 过滤逻辑一致）。
 static NTSTATUS
 RokAdapterMapMmio(
     _Inout_ PROK_ADAPTER      Adapter,
@@ -85,8 +89,14 @@ RokAdapterMapMmio(
 
             if (desc->u.Memory.Length > (16 * 1024 * 1024))
             {
+                // M3.4a：登记最大 MEM 窗口（VRAM 孔径），不映射。
+                if (desc->u.Memory.Length > Adapter->ApertureLength)
+                {
+                    Adapter->ApertureBase.QuadPart = desc->u.Memory.Start.QuadPart;
+                    Adapter->ApertureLength = desc->u.Memory.Length;
+                }
                 KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
-                           "rokmd:   skip large MEM window %#I64x len=%#x (M3 VRAM aperture)\n",
+                           "rokmd:   skip large MEM window %#I64x len=%#x (VRAM aperture, recorded)\n",
                            (UINT64)desc->u.Memory.Start.QuadPart,
                            desc->u.Memory.Length));
                 continue;
@@ -302,6 +312,11 @@ RokDdiStartDevice(
     // 显存探测（M3.1）：模拟路径取注册表配置，真实路径读 CONFIG_MEMSIZE。
     RokAdapterProbeVram(adapter);
 
+    // M3.4a：CP ring bring-up（默认关闭；<DriverKey>\Parameters\EnableRing=1
+    // 显式开启）。未开启时对硬件零写入。
+    RokGfxStartDeviceRing(adapter,
+                          haveDeviceInfo ? &deviceInfo.DeviceRegistryPath : NULL);
+
     adapter->Started = TRUE;
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
@@ -320,6 +335,10 @@ RokDdiStopDevice(
 
     if (adapter != NULL)
     {
+        // M3.4a：先停机我们启动过的 ring 并解除环窗口映射（ BAR0 仍映射着，
+        // 停机写入合法）；未开启 ring 时是零硬件写入的空操作。
+        RokRingHardwareStop(adapter);
+
         if (adapter->MmioVirtualAddress != NULL)
         {
             adapter->DxgkInterface.DxgkCbUnmapMemory(
