@@ -15,6 +15,7 @@
 #pragma once
 
 #include "rok_escape.h"     // ROK_U32（内核/用户态双模式）
+#include "r600hw.h"         // GRBM 块真值（M3.1 精确表：ROK_GRBM_*）
 
 // ------------------------------------------------------------------
 // 总线/配置块（直接 MMIO）
@@ -35,17 +36,16 @@
 // GRBM（图形寄存器总线管理）
 // ------------------------------------------------------------------
 #define ROK_REG_GRBM_CNTL                   0x8000UL
-#define ROK_REG_GRBM_STATUS                 0x8010UL
-#define ROK_REG_GRBM_STATUS2                0x8014UL
-#define ROK_REG_GRBM_SOFT_RESET             0x8020UL
-
-// GRBM_STATUS 位（r600d.h/evergreend.h）。
-#define ROK_GRBM_STATUS_GUI_ACTIVE          0x80000000UL
-#define ROK_GRBM_STATUS_CMDFIFO_AVAIL_MASK  0x0000001FUL
+// 偏移与状态位别名到 r600hw.h 的 M3.1 精确表（单一真值，防漂移）：
+#define ROK_REG_GRBM_STATUS                 ROK_GRBM_STATUS
+#define ROK_REG_GRBM_STATUS2                ROK_GRBM_STATUS2
+#define ROK_REG_GRBM_SOFT_RESET             ROK_GRBM_SOFT_RESET
+#define ROK_GRBM_STATUS_GUI_ACTIVE          ROK_GRBM_GUI_ACTIVE
+#define ROK_GRBM_STATUS_CMDFIFO_AVAIL_MASK  ROK_GRBM_CMDFIFO_AVAIL_MASK
 
 // GRBM_SOFT_RESET 位（evergreend.h 829-840；evergreen_cp_resume 使用
-// CP|PA|SH|VGT|SPI|SX 的组合）。
-#define ROK_SOFT_RESET_CP                   (1UL << 0)
+// CP|PA|SH|VGT|SPI|SX 的组合；CP 位别名 r600hw 的 ROK_GRBM_SOFT_RESET_CP）。
+#define ROK_SOFT_RESET_CP                   ROK_GRBM_SOFT_RESET_CP
 #define ROK_SOFT_RESET_CB                   (1UL << 1)
 #define ROK_SOFT_RESET_DB                   (1UL << 3)
 #define ROK_SOFT_RESET_PA                   (1UL << 5)

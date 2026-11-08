@@ -18,8 +18,9 @@
 L1 用 mock 内核原语（注册表内存表/池/cpuid 钩子）编译 kmd/src 的**真实
 源码字节**（sha256 前后校验，防测试漂移），是 KMD 逻辑改动的第一道回归；
 L1.5 补上 L1 不覆盖的 DDI 管线与生命周期平衡（kmock2 mock WDK 面 +
-vdxgkrnl 虚拟 OS：PCI 配置空间/回调表/资源清单/驱动键，DDI 表 89 成员
-经 DxgkInitialize 捕获后全部走表调用）；L2/L3 分别在 Wine 与 Windows VM
+vdxgkrnl 虚拟 OS：PCI 配置空间/回调表/资源清单/驱动键，DDI 表 94 成员
+（含 M2.8 追加的 LinkDevice/PowerRuntime/MPO v1 等）经 DxgkInitialize
+捕获后全部走表调用）；L2/L3 分别在 Wine 与 Windows VM
 里做集成验证。四层都不需要真实 TeraScale 卡。
 
 ## 1. KMD 侧机制（kmd/src/sim.c）
@@ -101,7 +102,8 @@ gpu_probe.exe
 ```
 
 `pci id` 显示 DID=0x5046 且 `caps` 带 `SIM` 位 = 模拟模式生效。
-`family=TS1` 是 RokGpuFamilyFromDeviceId 对未表列 DID 的默认值，
+`family=TS1` 是 RokHwIdentify 的兜底结果：DID 0x5046 未命中 r600hw.c
+精确表，回退 RokHwFamilyHeuristic 段规则默认 TS1，
 模拟设备不参与真实家族判定，属预期。
 
 ### 2.4 PM4 解码验证（M3 预演）
@@ -149,6 +151,16 @@ dd <SimRegisterSpace> L8          ; 写入的模拟寄存器值
 | VRAM 全 0 | escape QUERY_VRAM 在 M3 前恒为 0，VM 与真机行为一致 |
 | ati-vga 的 Rage 128 语义 | QEMU 的 ati-vga 实现了 Mach64/Rage128 的寄存器子集；rokmd 模拟模式不与它交互，仅占用其 PCI 形态 |
 
+### 6.0 环境选型注记（2026-11-08 实测）
+
+- **Wine 版本**：Kron4ek wine-10.2-amd64 在本沙箱被 seccomp 拦截
+  （`Bad system call`，wineboot 即崩），且 Wine ≥10 的 amd64 包已不再
+  提供 `wine64` 二进制。**用 wine-9.0-amd64 + `wine64` 命令**（其 `wine`
+  loader 是 32 位 ELF，纯 64 位沙箱缺 /lib/ld-linux.so.2 跑不起来）。
+- **llvm-mingw**：20261104 资产名带 `ubuntu-22.04`
+  （`llvm-mingw-<tag>-ucrt-ubuntu-22.04-x86_64.tar.xz`），解压目录仍匹配
+  构建脚本的 `llvm-mingw-*-x86_64` glob。
+
 ## 6. L2 参考实现：Wine 实跑记录（2026-11，Linux 沙箱）
 
 无需 Windows 也能跑 L2 用户态冒烟 —— 便携 llvm-mingw 交叉编译 + 便携
@@ -160,22 +172,26 @@ bash tests/gpu_probe/build-mingw.sh
 bash tests/vk_smoke/build-mingw.sh
 bash tests/adl_smoke/build-mingw.sh
 
-# Wine（前缀首跑 wineboot -i，之后直接运行）
+# Wine 9.0（前缀首跑 wine64 wineboot -i，之后直接运行；见 §6.0 选型注记）
 export WINEPREFIX=~/wine-prefix WINEDEBUG=-all
-wine64 tests/gpu_probe/gpu_probe.exe
-wine64 tests/vk_smoke/vk_smoke.exe
-wine64 tests/adl_smoke/adl_smoke.exe
+WINE=/home/z/tools/wine-9.0-amd64/bin/wine64
+${WINE} tests/gpu_probe/gpu_probe.exe
+${WINE} tests/vk_smoke/vk_smoke.exe
+${WINE} tests/adl_smoke/adl_smoke.exe
 ```
 
-实测输出要点（KVM 沙箱，无真实 GPU / 无宿主 Vulkan ICD）：
+实测输出要点（KVM 沙箱，无真实 GPU / 无宿主 Vulkan ICD；2026-11-08
+wine-9.0-amd64 复跑）：
 
 ```text
-gpu_probe : [1] "Wine GPU" 枚举成功；[1.5] hypervisor=KVMKVMKVM；
-            [2] D3DKMT 1 适配器（LUID 有效，UMD 查询 0xC0000002 = Wine 无
-            该 DDI，预期）；[2.5] winevulkan.json 清单读出；
-            [3] 3 个 instance extensions，vkCreateInstance=-9（无宿主 ICD，
-            预期）；[4] escape 探测优雅降级（0xC0000017 非 rokmd，预期）。
-vk_smoke  : vulkan-1.dll 加载 ✓ → vkCreateInstance -9（同上环境边界）。
+gpu_probe : [1] "Wine Adapter" 枚举成功；[1.5] hypervisor=KVMKVMKVM；
+            [2] wine-9.0 的 gdi32 无 D3DKMT 导出 → 提示需 WDDM 1.3+ 主机，
+            优雅降级；[2.5] winevulkan.json 清单读出；
+            [3] 3 个 instance extensions，vkCreateInstance=-3（无宿主 ICD，
+            预期）；[4] escape 探测优雅降级（D3DKMT 导出缺失，预期）。
+            全程 exit 0。
+vk_smoke  : vulkan-1.dll 加载 ✓ → vkCreateInstance -3（无宿主 ICD，环境
+            边界；FAIL 信息优雅退出）。
 adl_smoke : ADL2_Main_Control_Create → 枚举无 rokmd 绑定适配器 → 跳过
             （exit 0）—— shim 的控制面/枚举路径在 Wine 下真实执行。
 ```
@@ -196,7 +212,7 @@ escape set 版本校验/钳化/roundtrip/Overdrive 归一化；sim 三路判定�
 ## 8. L1.5 参考输出（模拟设备 E2E，2026-11）
 
 ```text
- DDI members registered: 89 / 89        ← DriverEntry 注册面全量非空
+ DDI members registered: 94 / 94        ← DriverEntry 注册面全量非空（含 M2.8）
 ==== PASS A — simulated device: QEMU ati-vga (1002:5046) ====
 rokmd: SIM MODE — VID=0x1002 DID=0x5046 hv=1 (reg=0 id=1)
 rokmd: ccc — imported (mask=0xf engine=900000KHz mem=1150000KHz od=1 fan=60)
@@ -205,13 +221,25 @@ rokmd: sim PM4 EVENT_WRITE_EOP (op 0x47, 4 dwords)
 rokmd: sim decode — 3 pkts total, 1 INDIRECT_BUFFER (base 0x10000000, 512 dwords)
 rokmd: SubmitCommandVirtual fence=77 → 78 → 79（QueryCurrentFence 全部回收）
 rokmd: ccc — set (mask=0xf engine=2000000KHz … fan=100)   ← 3GHz/150% 被钳制
+rokmd: QueryAdapterInfo NUMPOWERCOMPONENTS (0)           ← M2.8 追加面
+rokmd: VRAM (sim) = 536870912 bytes                       ← M3.1：VramSizeMb=512 覆盖
+  escape QUERY_VRAM    : Vram=512MB Gart=0 seg=0            ← M3.1 面
+  escape QUERY_SEGINFO : flags=VRAM_POPULATED               ← M3.1 面
+rokmd: LinkDevice (not supported — single adapter)
+rokmd: SetPowerComponentFState component=0 F=0 (no components)
+rokmd: PowerRuntimeControlRequest (runtime power not supported)
+rokmd: SetPowerPState component=0 pstate=0 (not supported)
 ==== PASS B — real form: Caicos (1002:6779), no hypervisor ====
 rokmd: sim — real/unknown hardware (…), simulation off    ← SIM 位不亮
 rokmd: BAR0 MMIO mapped PA=0xfde00000 len=0x10000          ← 真实映射路径
-==== sim-device E2E: 143 checks, 0 failed ====  （ASan/UBSan 全程无告警）
+==== sim-device E2E: 175 checks, 0 failed ====  （ASan/UBSan 全程无告警）
 ```
 
-覆盖（143 项检查）：DDI 表完整性（89 成员）；sim 全管线（caps WDDMv2/
+覆盖（175 项检查）：DDI 表完整性（94 成员，含 M2.8 追加的
+LinkDevice/SetPowerComponentFState/PowerRuntimeControlRequest/
+SetPowerPState/MPO v1 五成员点名）；M3.1 escape 面（VRAM/SEGINFO：
+sim 覆盖值 Parameters\VramSizeMb=512MB 生效、GART 未落地恒 0、
+真实形态 BAR0 全 0 时宁可不报的诚实边界）；sim 全管线（caps WDDMv2/
 MultiEngineAware、0 段、进程/设备/分配/上下文生命周期、BuildPagingBuffer
 PM4 NOP 填充、三次提交 + fence 轮询回收、PM4 直方图逐槽核对含 0x47→槽
 0x07 折叠语义）；escape 契约（VERSION/PCI_ID/CAPS/SIM_STATUS/CCC_GET/

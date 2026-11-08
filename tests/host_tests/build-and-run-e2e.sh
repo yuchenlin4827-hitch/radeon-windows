@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # host_tests E2E — 模拟设备端到端运行（L1.5）。
 #
-# 编译 kmd/src 的全部五个真实源文件（driver/adapter/ddi/sim/ccc），
+# 编译 kmd/src 的全部六个真实源文件（driver/adapter/ddi/sim/ccc/r600hw），
 # 以 kmock2 为内核环境、vdxgkrnl 为虚拟 dxgkrnl，在主机上完整走一遍
 # WDDM 2.0 管线（AddDevice → StartDevice → 分配 → 上下文 → 提交 →
 # fence 回收 → escape → 拆除），ASan/UBSan 全程开启。
@@ -18,8 +18,8 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "${SCRATCH}"' EXIT
 
 KMD_SRC="${REPO_ROOT}/kmd/src"
-FILES="adapter.h adapter.c sim.h sim.c ccc.h ccc.c ddi.h ddi.c driver.c precomp.h rok_escape.h ring.h ring.c gfxinit.h gfxinit.c regs_ts2.h evergreen_ucode.c"
-COMPILE_SRCS="adapter.c sim.c ccc.c ddi.c driver.c ring.c gfxinit.c evergreen_ucode.c"
+FILES="adapter.h adapter.c sim.h sim.c ccc.h ccc.c ddi.h ddi.c driver.c r600hw.h r600hw.c precomp.h rok_escape.h ring.h ring.c gfxinit.h gfxinit.c regs_ts2.h evergreen_ucode.c"
+COMPILE_SRCS="adapter.c sim.c ccc.c ddi.c driver.c r600hw.c ring.c gfxinit.c evergreen_ucode.c"
 
 echo "[e2e] repo = ${REPO_ROOT}"
 
@@ -48,7 +48,7 @@ command -v "${CC}" >/dev/null || CC=clang
     -o "${SCRATCH}/run_simdevice" \
     run_simdevice.c vdxgkrnl.c \
     "${SCRATCH}/adapter.c" "${SCRATCH}/sim.c" "${SCRATCH}/ccc.c" \
-    "${SCRATCH}/ddi.c" "${SCRATCH}/driver.c" \
+    "${SCRATCH}/ddi.c" "${SCRATCH}/driver.c" "${SCRATCH}/r600hw.c" \
     "${SCRATCH}/ring.c" "${SCRATCH}/gfxinit.c" "${SCRATCH}/evergreen_ucode.c"
 
 # 4) 编译后再校验：确保编译过程没有副作用改动源文件。

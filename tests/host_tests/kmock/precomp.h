@@ -85,6 +85,9 @@ typedef VOID*           PPVOID;
 #define _Success_(x)
 #define _Ret_maybenull_
 #define _Post_writable_byte_size_(x)
+#define _Out_writes_z_(x)
+#define _Out_opt_
+#define _Inout_opt_
 
 // adapter.h 生命周期声明用的 WDK 复合宏（仅声明，无实现编译）。
 #define IN_CONST_PDEVICE_OBJECT   const PVOID
@@ -213,12 +216,7 @@ static inline NTSTATUS KeDelayExecutionThread(KPROCESSOR_MODE Mode,
                                               BOOLEAN Alertable,
                                               union _LARGE_INTEGER_MOCK *Interval)
 { (void)Mode; (void)Alertable; (void)Interval; return 0; }   // 演练路径零等待
-static inline void KeStallExecutionProcessor(ULONG MicroSeconds)
-{ (void)MicroSeconds; }
 
-// ---- MMIO 原语（gfxinit.c 真实模式路径；宿主编译为普通内存访问）----
-#define READ_REGISTER_ULONG(reg)        (*(volatile ULONG *)(reg))
-#define WRITE_REGISTER_ULONG(reg, val)  ((void)(*(volatile ULONG *)(reg) = (val)))
 #define STATUS_DEVICE_HARDWARE_ERROR    ((NTSTATUS)0xC000035BL)
 #define STATUS_DEVICE_CONFIGURATION_ERROR ((NTSTATUS)0xC0000113L)
 #define STATUS_NOT_SUPPORTED            ((NTSTATUS)0xC00000BBL)
@@ -248,6 +246,23 @@ typedef struct _DXGK_START_INFO_MOCK {
 // 默认实现 = 真执行 x86 cpuid；测试可指向注入版（恒定 leaf1 ECX bit31 等）。
 extern void (*rok_mock_cpuid)(INT regs[4], INT leaf);
 void __cpuid(INT regs[4], INT leaf);
+
+// ---- MMIO（BAR0）mock：64KB 寄存器空间 + 读钩子 + 停顿计数 ----
+// r600hw.c 的 READ/WRITE_REGISTER_ULONG 落到这里：真实内核是设备内存，
+// 宿主是测试可控的普通内存。读钩子可在返回前改写值（模拟硬件状态
+// 迁移，如 GRBM GUI_ACTIVE 轮询后清零）；停顿只计数不实际等待。
+#define ROK_KMOCK_MMIO_SIZE 65536
+extern unsigned char rok_mock_mmio[ROK_KMOCK_MMIO_SIZE];
+typedef ULONG (*rok_mock_reg_hook_fn)(ULONG Offset, ULONG Value);
+extern rok_mock_reg_hook_fn rok_mock_reg_read_hook;   // NULL = 直读
+extern long rok_mock_stall_count;                     // RokStallUs 次数
+extern long rok_mock_stall_us_total;                  // 累计微秒
+void rok_mock_mmio_reset(void);
+ULONG rok_mock_read_reg(volatile ULONG *p);
+void  rok_mock_write_reg(volatile ULONG *p, ULONG v);
+#define READ_REGISTER_ULONG(p)      rok_mock_read_reg((p))
+#define WRITE_REGISTER_ULONG(p, v)  rok_mock_write_reg((p), (v))
+void KeStallExecutionProcessor(ULONG us);
 
 // SIZE_T 最大值（ExAllocatePoolWithTag 失败语义测试用）
 #ifndef ROK_KMOCK_SIZE_MAX

@@ -13,13 +13,13 @@ struct _ROK_ADAPTER;
 // 模拟模式：落到 sim.c 的 64KB SimRegisterSpace（host 测试即测试真实代码路径）。
 // 两者都不可用：返回 0 / 丢弃写入（调用方用状态快照的 MmioSource 区分）。
 ROK_U32
-RokRegRead32(
+RokDevRegRead32(
     _In_opt_ struct _ROK_ADAPTER *Adapter,
     _In_ ROK_U32 Offset
     );
 
 VOID
-RokRegWrite32(
+RokDevRegWrite32(
     _In_opt_ struct _ROK_ADAPTER *Adapter,
     _In_ ROK_U32 Offset,
     _In_ ROK_U32 Value

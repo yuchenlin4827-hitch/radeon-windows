@@ -64,6 +64,16 @@ typedef UCHAR*          PUCHAR;
 typedef USHORT*         PUSHORT;
 typedef HANDLE*         PHANDLE;
 typedef PVOID*          PPVOID;
+typedef SIZE_T*         PSIZE_T;
+
+// ---- GUID（PowerRuntimeControlRequest 的控制码参数）----
+typedef struct _GUID {
+    ULONG   Data1;
+    USHORT  Data2;
+    USHORT  Data3;
+    UCHAR   Data4[8];
+} GUID;
+typedef const GUID *LPCGUID;
 
 #ifndef CONST
 #define CONST const
@@ -92,12 +102,28 @@ typedef PVOID*          PPVOID;
 #endif
 
 // ---- SAL 标注（宿主全为空）----
+// WDM 遗留 IN/OUT/OPTIONAL 宏（ddi.h M2.8 新成员签名沿用 WDK 拼写）。
+#ifndef IN
+#define IN
+#endif
+#ifndef OUT
+#define OUT
+#endif
+#ifndef OPTIONAL
+#define OPTIONAL
+#endif
 #define _In_
 #define _Out_
 #define _Inout_
 #define _In_opt_
 #define _In_reads_bytes_(x)
 #define _In_reads_bytes_opt_(x)
+#define _Out_writes_z_(x)
+/* 旧式 WINBASE 风格注解（新增 DDI 声明逐字对齐 WDK 26100 时使用）*/
+#define IN
+#define OUT
+#define INOUT
+#define OPTIONAL
 #define _Inout_updates_bytes_(x)
 #define _Inout_updates_bytes_opt_(x)
 #define _Out_writes_bytes_(x)
@@ -133,6 +159,8 @@ typedef PVOID*          PPVOID;
 #define INOUT_PDXGK_CHILD_STATUS            DXGK_CHILD_STATUS*
 #define INOUT_PDXGK_DEVICE_DESCRIPTOR       DXGK_DEVICE_DESCRIPTOR*
 #define INOUT_PDXGK_CHILD_CONTAINER_ID      DXGK_CHILD_CONTAINER_ID*
+// LDA 链接协商（LinkDevice 第三参数，实为指针类型，WDK 同款拼写）。
+#define INOUT_PLINKED_DEVICE                PLINKED_DEVICE
 
 // ---- ntintsafe / WDM 前向类型（SetPowerState/NotifyAcpiEvent 桩参数）----
 typedef enum _DEVICE_POWER_STATE { PowerDeviceUnspecified = 0, PowerDeviceD3 = 4 } DEVICE_POWER_STATE;
@@ -173,6 +201,11 @@ typedef struct _LIST_ENTRY {
     struct _LIST_ENTRY *Blink;
 } LIST_ENTRY, *PLIST_ENTRY;
 
+// LINKED_DEVICE（DxgkDdiLinkDevice 参数；驱动明确拒绝 LDA，仅保签名）。
+typedef struct _LINKED_DEVICE {
+    ULONG Dummy;
+} LINKED_DEVICE, *PLINKED_DEVICE;
+
 #define CONTAINING_RECORD(addr, type, field) \
     ((type *)((CHAR *)(addr) - offsetof(type, field)))
 
@@ -196,27 +229,28 @@ static __inline LONG RokM2InterlockedExchange(volatile LONG *Target, LONG Value)
 #define InterlockedExchange(Target, Value) \
     RokM2InterlockedExchange((volatile LONG *)(Target), (LONG)(Value))
 
-// ---- M2.8/M3.4a 增补（ddi.c/driver.c/gfxinit.c 引用面）----
 #define IN
 #define OUT
 #define OPTIONAL
-#ifndef PSIZE_T
-#define PSIZE_T SIZE_T*
-#endif
-typedef struct _LINKED_DEVICE { ULONG Dummy; } LINKED_DEVICE, *PLINKED_DEVICE;
-#define INOUT_PLINKED_DEVICE    PLINKED_DEVICE
-static __inline LONG RokM3InterlockedIncrement(volatile LONG *Addend)
-{ return (LONG)__atomic_add_fetch(Addend, 1, __ATOMIC_SEQ_CST); }
-static __inline LONG RokM3InterlockedCompareExchange(volatile LONG *Destination,
-                                                     LONG Ex, LONG Cmp)
-{ return (LONG)__atomic_compare_exchange_n(Destination, &Cmp, Ex, 0,
-                                           __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
-         ? (LONG)Cmp : (LONG)__atomic_load_n(Destination, __ATOMIC_SEQ_CST); }
-#define InterlockedIncrement(Target) \
-    RokM3InterlockedIncrement((volatile LONG *)(Target))
-#define InterlockedCompareExchange(Destination, Exchange, Comparand) \
-    RokM3InterlockedCompareExchange((volatile LONG *)(Destination), \
-                                    (LONG)(Exchange), (LONG)(Comparand))
+static __inline LONG RokM2InterlockedIncrement(volatile LONG *Addend)
+{
+    return __atomic_add_fetch(Addend, 1, __ATOMIC_SEQ_CST);
+}
+#define InterlockedIncrement(Addend) \
+    RokM2InterlockedIncrement((volatile LONG *)(Addend))
+
+// WDK 语义：始终返回 Destination 的原值（交换前）。
+// GCC builtin 无论成败都会把 Destination 原值写回 expected（此处 Comperand）。
+static __inline LONG RokM2InterlockedCompareExchange(volatile LONG *Destination,
+                                                     LONG Exchange, LONG Comperand)
+{
+    __atomic_compare_exchange_n(Destination, &Comperand, Exchange, 0,
+                                __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return Comperand;
+}
+#define InterlockedCompareExchange(Destination, Exchange, Comperand) \
+    RokM2InterlockedCompareExchange((volatile LONG *)(Destination), \
+                                    (LONG)(Exchange), (LONG)(Comperand))
 
 // ---- NTSTATUS ----
 typedef LONG NTSTATUS;
@@ -254,6 +288,14 @@ void rok_kdprintf(ULONG Component, ULONG Level, PCSTR Fmt, ...);
 #define RtlCopyMemory(d, s, l)  memcpy((d), (s), (l))
 #define RtlFillMemory(d, l, f)  memset((d), (f), (l))
 #define RtlEqualMemory(a, b, l) (memcmp((a), (b), (l)) == 0)
+
+// ---- 寄存器访问原语（宿主 = volatile 解引用；真机 MMIO 语义由硬件保证）----
+#define READ_REGISTER_ULONG(reg)    (*(volatile ULONG *)(reg))
+#define WRITE_REGISTER_ULONG(reg,v) ((void)(*(volatile ULONG *)(reg) = (ULONG)(v)))
+#define READ_REGISTER_USHORT(reg)   (*(volatile USHORT *)(reg))
+#define WRITE_REGISTER_USHORT(reg,v)((void)(*(volatile USHORT *)(reg) = (USHORT)(v)))
+#define READ_REGISTER_UCHAR(reg)    (*(volatile UCHAR *)(reg))
+#define WRITE_REGISTER_UCHAR(reg,v) ((void)(*(volatile UCHAR *)(reg) = (UCHAR)(v)))
 
 // ---- 池分配（malloc 底座 + tag 记账，E2E 退出前核对平衡）----
 typedef enum _POOL_TYPE { NonPagedPool = 0, PagedPool = 1 } POOL_TYPE;
@@ -314,23 +356,23 @@ extern ROK_MOCK_REG_VALUE rok_mock_registry[];
 extern const int          rok_mock_registry_count;
 void rok_mock_registry_reset(void);
 
-// ---- M3.4a 增补（gfxinit.c/ring.c 的原语面）----
-// MMIO 原语：宿主编译为普通内存访问（vdxgkrnl 的 BAR0 映射是 calloc 缓冲）。
-#ifndef READ_REGISTER_ULONG
-#define READ_REGISTER_ULONG(reg)        (*(volatile ULONG *)(reg))
-#endif
-#ifndef WRITE_REGISTER_ULONG
-#define WRITE_REGISTER_ULONG(reg, val)  ((void)(*(volatile ULONG *)(reg) = (val)))
-#endif
-#ifndef STATUS_DEVICE_HARDWARE_ERROR
-#define STATUS_DEVICE_HARDWARE_ERROR    ((NTSTATUS)0xC000035BL)
-#endif
-// 延时原语：演练/宿主路径零等待。
+// ---- MMIO（BAR0）mock + 停顿计数（r600hw.c 宿主构建用，语义同 kmock1）----
+// E2E 走模拟设备路径，BAR0 理应零访问；越界读写即 abort（暴露意外直访）。
+#define ROK_KMOCK_MMIO_SIZE 0x10000
+extern unsigned char rok_mock_mmio[ROK_KMOCK_MMIO_SIZE];
+ULONG rok_mock_read_reg(volatile ULONG *p);
+void  rok_mock_write_reg(volatile ULONG *p, ULONG v);
+#define READ_REGISTER_ULONG(p)      rok_mock_read_reg((p))
+#define WRITE_REGISTER_ULONG(p, v)  rok_mock_write_reg((p), (v))
+void KeStallExecutionProcessor(ULONG us);
+
+// ---- M3.4a 增补（gfxinit.c 演练/延路面）----
 #ifndef KernelMode
 #define KernelMode  0
 #endif
 static inline NTSTATUS KeDelayExecutionThread(int Mode, BOOLEAN Alertable,
                                               LARGE_INTEGER *Interval)
 { (void)Mode; (void)Alertable; (void)Interval; return 0; }
-static inline void KeStallExecutionProcessor(ULONG MicroSeconds)
-{ (void)MicroSeconds; }
+#ifndef STATUS_DEVICE_HARDWARE_ERROR
+#define STATUS_DEVICE_HARDWARE_ERROR    ((NTSTATUS)0xC000035BL)
+#endif

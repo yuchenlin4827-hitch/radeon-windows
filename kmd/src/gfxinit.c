@@ -53,11 +53,13 @@ RokGfxDelayMs(
 // ------------------------------------------------------------------
 
 ROK_U32
-RokRegRead32(
+RokDevRegRead32(
     _In_opt_ struct _ROK_ADAPTER *Adapter,
     _In_ ROK_U32 Offset
     )
 {
+    ULONG value = 0;
+
     if (Adapter == NULL)
     {
         return 0;
@@ -73,18 +75,20 @@ RokRegRead32(
         return 0;
     }
 
-    if (Adapter->MmioVirtualAddress != NULL &&
-        Offset + sizeof(ROK_U32) <= Adapter->MmioLength)
+    // 真实路径委托 r600hw 的边界检查直访（kmock 宿主构建落 mock MMIO）。
+    if (Adapter->MmioVirtualAddress != NULL)
     {
-        return READ_REGISTER_ULONG(
-            (volatile ULONG *)((PUCHAR)Adapter->MmioVirtualAddress + Offset));
+        if (RokRegRead32(Adapter->MmioVirtualAddress, Adapter->MmioLength,
+                         Offset, &value))
+        {
+            return (ROK_U32)value;
+        }
     }
-
     return 0;
 }
 
 VOID
-RokRegWrite32(
+RokDevRegWrite32(
     _In_opt_ struct _ROK_ADAPTER *Adapter,
     _In_ ROK_U32 Offset,
     _In_ ROK_U32 Value
@@ -105,17 +109,16 @@ RokRegWrite32(
         return;
     }
 
-    if (Adapter->MmioVirtualAddress != NULL &&
-        Offset + sizeof(ROK_U32) <= Adapter->MmioLength)
+    // 真实路径委托 r600hw 的边界检查直访。
+    if (Adapter->MmioVirtualAddress != NULL)
     {
-        WRITE_REGISTER_ULONG(
-            (volatile ULONG *)((PUCHAR)Adapter->MmioVirtualAddress + Offset),
-            Value);
+        (VOID)RokRegWrite32(Adapter->MmioVirtualAddress, Adapter->MmioLength,
+                            Offset, Value);
     }
 }
 
 // ------------------------------------------------------------------
-// 只读状态快照（escape type 10）
+// 只读状态快照（escape type 12）
 // ------------------------------------------------------------------
 
 NTSTATUS
@@ -149,32 +152,32 @@ RokGfxProbeStatus(
                           ? Adapter->SimRegisterSpaceSize
                           : Adapter->MmioLength;
 
-    Out->ConfigMemsize    = RokRegRead32(Adapter, ROK_REG_CONFIG_MEMSIZE);
-    fbLoc                 = RokRegRead32(Adapter, ROK_REG_MC_VM_FB_LOCATION);
+    Out->ConfigMemsize    = RokDevRegRead32(Adapter, ROK_REG_CONFIG_MEMSIZE);
+    fbLoc                 = RokDevRegRead32(Adapter, ROK_REG_MC_VM_FB_LOCATION);
     Out->McVmFbLocation   = fbLoc;
     Out->FbBaseBytes      = (fbLoc & 0xFFFFUL) << 24;
-    Out->McApertureLow    = RokRegRead32(Adapter, ROK_REG_MC_VM_SYSTEM_APERTURE_LOW);
-    Out->McApertureHigh   = RokRegRead32(Adapter, ROK_REG_MC_VM_SYSTEM_APERTURE_HIGH);
+    Out->McApertureLow    = RokDevRegRead32(Adapter, ROK_REG_MC_VM_SYSTEM_APERTURE_LOW);
+    Out->McApertureHigh   = RokDevRegRead32(Adapter, ROK_REG_MC_VM_SYSTEM_APERTURE_HIGH);
 
-    Out->SrbmStatus       = RokRegRead32(Adapter, ROK_REG_SRBM_STATUS);
-    Out->SrbmStatus2      = RokRegRead32(Adapter, ROK_REG_SRBM_STATUS2);
-    Out->GrbmStatus       = RokRegRead32(Adapter, ROK_REG_GRBM_STATUS);
-    Out->GrbmStatus2      = RokRegRead32(Adapter, ROK_REG_GRBM_STATUS2);
+    Out->SrbmStatus       = RokDevRegRead32(Adapter, ROK_REG_SRBM_STATUS);
+    Out->SrbmStatus2      = RokDevRegRead32(Adapter, ROK_REG_SRBM_STATUS2);
+    Out->GrbmStatus       = RokDevRegRead32(Adapter, ROK_REG_GRBM_STATUS);
+    Out->GrbmStatus2      = RokDevRegRead32(Adapter, ROK_REG_GRBM_STATUS2);
 
-    Out->CpStalledStat1   = RokRegRead32(Adapter, ROK_REG_CP_STALLED_STAT1);
-    Out->CpStalledStat2   = RokRegRead32(Adapter, ROK_REG_CP_STALLED_STAT2);
-    Out->CpBusyStat       = RokRegRead32(Adapter, ROK_REG_CP_BUSY_STAT);
-    Out->CpStat           = RokRegRead32(Adapter, ROK_REG_CP_STAT);
-    Out->CpMeCntl         = RokRegRead32(Adapter, ROK_REG_CP_ME_CNTL);
+    Out->CpStalledStat1   = RokDevRegRead32(Adapter, ROK_REG_CP_STALLED_STAT1);
+    Out->CpStalledStat2   = RokDevRegRead32(Adapter, ROK_REG_CP_STALLED_STAT2);
+    Out->CpBusyStat       = RokDevRegRead32(Adapter, ROK_REG_CP_BUSY_STAT);
+    Out->CpStat           = RokDevRegRead32(Adapter, ROK_REG_CP_STAT);
+    Out->CpMeCntl         = RokDevRegRead32(Adapter, ROK_REG_CP_ME_CNTL);
 
-    Out->CpRbBase         = RokRegRead32(Adapter, ROK_REG_CP_RB_BASE);
-    Out->CpRbCntl         = RokRegRead32(Adapter, ROK_REG_CP_RB_CNTL);
-    Out->CpRbRptr         = RokRegRead32(Adapter, ROK_REG_CP_RB_RPTR);
-    Out->CpRbWptr         = RokRegRead32(Adapter, ROK_REG_CP_RB_WPTR);
+    Out->CpRbBase         = RokDevRegRead32(Adapter, ROK_REG_CP_RB_BASE);
+    Out->CpRbCntl         = RokDevRegRead32(Adapter, ROK_REG_CP_RB_CNTL);
+    Out->CpRbRptr         = RokDevRegRead32(Adapter, ROK_REG_CP_RB_RPTR);
+    Out->CpRbWptr         = RokDevRegRead32(Adapter, ROK_REG_CP_RB_WPTR);
 
-    Out->ScratchUmsk      = RokRegRead32(Adapter, ROK_REG_SCRATCH_UMSK);
-    Out->ScratchReg6      = RokRegRead32(Adapter, ROK_REG_SCRATCH_REG6);
-    Out->ScratchReg7      = RokRegRead32(Adapter, ROK_REG_SCRATCH_REG7);
+    Out->ScratchUmsk      = RokDevRegRead32(Adapter, ROK_REG_SCRATCH_UMSK);
+    Out->ScratchReg6      = RokDevRegRead32(Adapter, ROK_REG_SCRATCH_REG6);
+    Out->ScratchReg7      = RokDevRegRead32(Adapter, ROK_REG_SCRATCH_REG7);
 
     // rokmd 自身 ring 状态（区别于寄存器里看到的 ring 配置）。
     Out->RingReady        = Adapter->Ring.Ready ? 1 : 0;
@@ -201,32 +204,32 @@ RokCpLoadUcode(
     ULONG i;
 
     // r700_cp_stop（evergreen.c 2976）：ME/PFP 停机 + 关 scratch 掩码。
-    RokRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_HALT);
-    RokRegWrite32(Adapter, ROK_REG_SCRATCH_UMSK, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_HALT);
+    RokDevRegWrite32(Adapter, ROK_REG_SCRATCH_UMSK, 0);
 
     // 微码写入期间用最小哑环（evergreen.c 2977-2981）。
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_CNTL,
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_CNTL,
                   ROK_RB_NO_UPDATE | ROK_RB_BLKSZ(15) | ROK_RB_BUFSZ(3));
 
     // PFP：地址计数器清零后逐 dword 写（evergreen.c 2983-2987）。
-    RokRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_ADDR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_ADDR, 0);
     for (i = 0; i < ROK_EVERGREEN_PFP_UCODE_DWORDS; i++)
     {
-        RokRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_DATA, RokEvergreenPfpUcode[i]);
+        RokDevRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_DATA, RokEvergreenPfpUcode[i]);
     }
-    RokRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_ADDR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_ADDR, 0);
 
     // ME：WADDR 清零后逐 dword 写（evergreen.c 2989-2994）。
-    RokRegWrite32(Adapter, ROK_REG_CP_ME_RAM_WADDR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_ME_RAM_WADDR, 0);
     for (i = 0; i < ROK_EVERGREEN_PM4_UCODE_DWORDS; i++)
     {
-        RokRegWrite32(Adapter, ROK_REG_CP_ME_RAM_DATA, RokEvergreenMeUcode[i]);
+        RokDevRegWrite32(Adapter, ROK_REG_CP_ME_RAM_DATA, RokEvergreenMeUcode[i]);
     }
 
     // 收尾（evergreen.c 2996-2999）。
-    RokRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_ADDR, 0);
-    RokRegWrite32(Adapter, ROK_REG_CP_ME_RAM_WADDR, 0);
-    RokRegWrite32(Adapter, ROK_REG_CP_ME_RAM_RADDR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_PFP_UCODE_ADDR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_ME_RAM_WADDR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_ME_RAM_RADDR, 0);
 
     Adapter->UcodeLoaded = TRUE;
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
@@ -248,40 +251,40 @@ RokCpProgramRing(
     ROK_U32 tmp;
 
     // 1) GRBM 软复位 CP+PA+SH+VGT+SPI+SX（evergreen.c 3076-3083）。
-    RokRegWrite32(Adapter, ROK_REG_GRBM_SOFT_RESET,
+    RokDevRegWrite32(Adapter, ROK_REG_GRBM_SOFT_RESET,
                   ROK_SOFT_RESET_EVERGREEN_CP_MASK);
-    (VOID)RokRegRead32(Adapter, ROK_REG_GRBM_SOFT_RESET);
+    (VOID)RokDevRegRead32(Adapter, ROK_REG_GRBM_SOFT_RESET);
     RokGfxDelayMs(15);
-    RokRegWrite32(Adapter, ROK_REG_GRBM_SOFT_RESET, 0);
-    (VOID)RokRegRead32(Adapter, ROK_REG_GRBM_SOFT_RESET);
+    RokDevRegWrite32(Adapter, ROK_REG_GRBM_SOFT_RESET, 0);
+    (VOID)RokDevRegRead32(Adapter, ROK_REG_GRBM_SOFT_RESET);
 
     // 2) 环容量字段（evergreen.c 3086-3091）：
     //    BLKSZ = order_base_2(4096/8) = 9；BUFSZ = log2 容量。
     tmp = ROK_RB_BLKSZ(ROK_RING_BLKSZ_LOG2) | ROK_RB_BUFSZ(Ring->BufszLog2);
 
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_CNTL, tmp);
-    RokRegWrite32(Adapter, ROK_REG_CP_SEM_WAIT_TIMER, 0);
-    RokRegWrite32(Adapter, ROK_REG_CP_SEM_INCOMPLETE_TIMER_CNTL, 0);
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_WPTR_DELAY, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_CNTL, tmp);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_SEM_WAIT_TIMER, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_SEM_INCOMPLETE_TIMER_CNTL, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_WPTR_DELAY, 0);
 
     // 3) 软件接管读指针清零（evergreen.c 3094-3097）。
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_CNTL, tmp | ROK_RB_RPTR_WR_ENA);
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_RPTR_WR, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_CNTL, tmp | ROK_RB_RPTR_WR_ENA);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_RPTR_WR, 0);
     Ring->WptrDwords = 0;
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_WPTR, Ring->WptrDwords);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_WPTR, Ring->WptrDwords);
 
     // 4) 无 writeback：NO_UPDATE + 关 scratch 掩码，rptr 从 MMIO(0x8700) 轮询
     //    （evergreen.c 3100-3110 的 wb.enabled=FALSE 分支；SCRATCH_ADDR 不写）。
     tmp |= ROK_RB_NO_UPDATE;
-    RokRegWrite32(Adapter, ROK_REG_SCRATCH_UMSK, 0);
+    RokDevRegWrite32(Adapter, ROK_REG_SCRATCH_UMSK, 0);
 
     RokGfxDelayMs(1);
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_CNTL, tmp);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_CNTL, tmp);
 
     // 5) 环基址（>>8 定位）+ CP_DEBUG（evergreen.c 3119-3121）。
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_BASE,
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_BASE,
                   (ROK_U32)(Ring->GpuAddr >> 8));
-    RokRegWrite32(Adapter, ROK_REG_CP_DEBUG, (1UL << 27) | (1UL << 28));
+    RokDevRegWrite32(Adapter, ROK_REG_CP_DEBUG, (1UL << 27) | (1UL << 28));
 
     Ring->HwProgrammed = TRUE;
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
@@ -304,11 +307,11 @@ RokCpMeInitAndUnhalt(
     RokRingWriteMeInitialize(Ring, ROK_ME_INIT_MAX_HW_CONTEXTS);
 
     // ring 提交：把本地 WPTR 写入寄存器并读回 flush（r600_gfx_set_wptr 同款）。
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_WPTR, Ring->WptrDwords);
-    (VOID)RokRegRead32(Adapter, ROK_REG_CP_RB_WPTR);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_WPTR, Ring->WptrDwords);
+    (VOID)RokDevRegRead32(Adapter, ROK_REG_CP_RB_WPTR);
 
     // 解除停机（evergreen.c 3020-3023：cp_me = 0xff）。
-    RokRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_UNHALT);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_UNHALT);
 
     Ring->Ready = TRUE;
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
@@ -330,22 +333,22 @@ RokRingTest(
     ULONG i;
 
     // 种子写 scratch（MMIO 侧），CP 经 SET_CONFIG_REG 覆写为哨兵值。
-    RokRegWrite32(Adapter, ROK_REG_SCRATCH_REG6, ROK_RING_TEST_SEED);
+    RokDevRegWrite32(Adapter, ROK_REG_SCRATCH_REG6, ROK_RING_TEST_SEED);
     RokRingWriteSetConfigReg(Ring, ROK_REG_SCRATCH_REG6, ROK_RING_TEST_SENTINEL);
 
-    RokRegWrite32(Adapter, ROK_REG_CP_RB_WPTR, Ring->WptrDwords);
-    (VOID)RokRegRead32(Adapter, ROK_REG_CP_RB_WPTR);
+    RokDevRegWrite32(Adapter, ROK_REG_CP_RB_WPTR, Ring->WptrDwords);
+    (VOID)RokDevRegRead32(Adapter, ROK_REG_CP_RB_WPTR);
 
     if (Rehearse)
     {
         // 演练：没有真实 CP 取指 —— sim 后端代执行该包（写哨兵），
         // 轮询逻辑本身仍走完整路径（首轮命中）。
-        RokRegWrite32(Adapter, ROK_REG_SCRATCH_REG6, ROK_RING_TEST_SENTINEL);
+        RokDevRegWrite32(Adapter, ROK_REG_SCRATCH_REG6, ROK_RING_TEST_SENTINEL);
     }
 
     for (i = 0; i < ROK_RING_TEST_MAX_POLLS; i++)
     {
-        value = RokRegRead32(Adapter, ROK_REG_SCRATCH_REG6);
+        value = RokDevRegRead32(Adapter, ROK_REG_SCRATCH_REG6);
         if (value == ROK_RING_TEST_SENTINEL)
         {
             break;
@@ -355,7 +358,7 @@ RokRingTest(
 
     Adapter->RingTestRetries = i;
     Adapter->RingTestValue = value;
-    Adapter->Ring.RptrDwords = RokRegRead32(Adapter, ROK_REG_CP_RB_RPTR);
+    Adapter->Ring.RptrDwords = RokDevRegRead32(Adapter, ROK_REG_CP_RB_RPTR);
 
     if (value == ROK_RING_TEST_SENTINEL)
     {
@@ -460,13 +463,20 @@ RokRingHardwareInit(
                        "rokmd: ring init skipped (no BAR0 MMIO)\n"));
             return STATUS_DEVICE_CONFIGURATION_ERROR;
         }
-        if (RokGpuFamilyFromDeviceId(Adapter->PciDeviceId) != ROK_GPU_FAMILY_TS2)
+        // 家族门槛：优先用 RokHwIdentify（M3.1 精确表）的快照；
+        // 快照未填充（如演练/单测直调）时退回 r600hw 启发式。
         {
-            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
-                       "rokmd: ring init skipped (DID 0x%04X not TS2; "
-                       "ucode is CAICOS-family)\n",
-                       Adapter->PciDeviceId));
-            return STATUS_NOT_SUPPORTED;
+            ULONG family = (Adapter->HwChip.Family != 0)
+                               ? Adapter->HwChip.Family
+                               : RokHwFamilyHeuristic(Adapter->PciDeviceId);
+            if (family != ROK_GPU_FAMILY_TS2)
+            {
+                KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+                           "rokmd: ring init skipped (DID 0x%04X not TS2; "
+                           "ucode is CAICOS-family)\n",
+                           Adapter->PciDeviceId));
+                return STATUS_NOT_SUPPORTED;
+            }
         }
         if (Adapter->ApertureLength < ROK_RING_VRAM_OFFSET + ROK_RING_SIZE_BYTES)
         {
@@ -477,7 +487,7 @@ RokRingHardwareInit(
         }
 
         {
-            ROK_U32 fbLoc = RokRegRead32(Adapter, ROK_REG_MC_VM_FB_LOCATION);
+            ROK_U32 fbLoc = RokDevRegRead32(Adapter, ROK_REG_MC_VM_FB_LOCATION);
             UINT64 fbBase = (UINT64)(fbLoc & 0xFFFFUL) << 24;
 
             if (fbBase == 0)
@@ -542,7 +552,7 @@ RokRingHardwareInit(
     {
         // 回环失败：保持已编程状态（escape 可观测诊断），停机 ME 防
         // 后续异常取指。
-        RokRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_HALT);
+        RokDevRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_HALT);
         ring->Ready = FALSE;
         return status;
     }
@@ -569,7 +579,7 @@ RokRingHardwareStop(
     // 停机 CP（仅当我们编程过；未开启 ring 时对硬件零写入）。
     if (Adapter->Ring.HwProgrammed)
     {
-        RokRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_HALT);
+        RokDevRegWrite32(Adapter, ROK_REG_CP_ME_CNTL, ROK_CP_ME_CNTL_HALT);
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
                    "rokmd: ring stopped (CP halted)\n"));
     }

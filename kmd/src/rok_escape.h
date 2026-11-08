@@ -19,12 +19,14 @@
 #include <ntddk.h>
 typedef UINT32   ROK_U32;
 typedef UINT64   ROK_U64;
+typedef char     ROK_CHAR8;
 
 #else  /* 用户态（Windows / MinGW / clang-cl） */
 
 #include <stdint.h>
 typedef uint32_t ROK_U32;
 typedef uint64_t ROK_U64;
+typedef char     ROK_CHAR8;
 
 #ifndef C_ASSERT
 #define ROK_CASSERT_PASTE2(x, y) x##y
@@ -41,7 +43,9 @@ typedef uint64_t ROK_U64;
 #define ROK_ESCAPE_VERSION      1UL
 
 // Escape 类型（v1 查询面；M2.6 追加 SIM/CCC 为 6/7/8，M2.8 追加引擎状态为 9，
-// M3.4a 追加硬件状态为 10，均向后兼容：旧调用方不感知新增类型）。
+// M3.1/M3.2 追加硬件信息为 10/CP 软复位触发为 11，M3.4a 追加寄存器快照为
+// 12；均向后兼容：旧调用方不感知新增类型）。类型 11 会写硬件寄存器，
+// 仅供探测工具显式调用；KMD 侧在 BAR0 未映射时拒绝。
 typedef enum _ROK_ESCAPE_TYPE
 {
     ROK_ESC_TYPE_QUERY_VERSION   = 1,    // -> ROK_ESC_VERSION_OUT
@@ -53,7 +57,9 @@ typedef enum _ROK_ESCAPE_TYPE
     ROK_ESC_TYPE_CCC_GET_SETTINGS = 7,   // -> ROK_ESC_CCC_SETTINGS（M2.6，ccc.c）
     ROK_ESC_TYPE_CCC_SET_SETTINGS = 8,   // <- ROK_ESC_CCC_SETTINGS（M2.6，输入报文）
     ROK_ESC_TYPE_QUERY_ENGINE_STATUS = 9, // -> ROK_ESC_ENGINE_STATUS_OUT（M2.8）
-    ROK_ESC_TYPE_QUERY_HW_STATUS = 10,   // -> ROK_ESC_HW_STATUS_OUT（M3.4a）
+    ROK_ESC_TYPE_QUERY_HW_INFO   = 10,   // -> ROK_ESC_HW_INFO_OUT（M3.1，只读）
+    ROK_ESC_TYPE_HW_CP_RESET     = 11,   // -> ROK_ESC_HW_RESET_OUT（M3.2，写硬件）
+    ROK_ESC_TYPE_QUERY_HW_STATUS = 12,   // -> ROK_ESC_HW_STATUS_OUT（M3.4a，只读）
 } ROK_ESCAPE_TYPE;
 
 // 能力位（ROK_ESC_CAPS_OUT.CapsMask）。
@@ -65,7 +71,8 @@ typedef enum _ROK_ESCAPE_TYPE
 #define ROK_CAP_VRAM_SEGMENT        0x00000400UL  // M3：VRAM 段可用
 #define ROK_CAP_SEGMENT_QUERY       0x00000800UL  // QUERY_SEGMENT_INFO 可用（v1.1）
 #define ROK_CAP_ENGINE_STATUS_QUERY 0x00001000UL  // M2.8：QUERY_ENGINE_STATUS 可用
-#define ROK_CAP_HW_STATUS_QUERY     0x00002000UL  // M3.4a：QUERY_HW_STATUS 可用
+#define ROK_CAP_HW_INFO_QUERY       0x00002000UL  // M3.1：QUERY_HW_INFO 可用
+#define ROK_CAP_HW_STATUS_QUERY     0x00004000UL  // M3.4a：QUERY_HW_STATUS 可用
 
 // 段标志（ROK_ESC_SEGMENT_INFO_OUT.Flags）。
 #define ROK_SEG_FLAG_VRAM_POPULATED 0x00000001UL  // VramSizeBytes 已探测
@@ -182,8 +189,38 @@ typedef struct _ROK_ESC_ENGINE_STATUS_OUT
     ROK_U32 Reserved[2];            // 0
 } ROK_ESC_ENGINE_STATUS_OUT, *PROK_ESC_ENGINE_STATUS_OUT;
 
-// ---- 硬件状态快照（M3.4a；escape 查询 10，只读，KMD 侧 gfxinit.c 填充）----
+// ---- 硬件信息（M3.1；escape 查询 10，只读）----
+// StartDevice 阶段的识别快照 + GRBM_STATUS 只读采样。ChipName 为 NUL
+// 结尾短名（"CAICOS"/"TURKS"/…；未收录 = "UNKNOWN"，Family 由启发式给出）。
+typedef struct _ROK_ESC_HW_INFO_OUT
+{
+    ROK_U32     Family;         // ROK_GPU_FAMILY_*（ABI 值，同 QUERY_PCI_ID）
+    ROK_U32     Chip;           // ROK_HW_CHIP_*（精确表命中；未收录 = 0）
+    ROK_CHAR8   ChipName[12];   // NUL 结尾短名
+    ROK_U32     RevisionId;     // PCI revision（StartDevice 读取）
+    ROK_U32     MmioMapped;     // 1 = BAR0 已映射
+    ROK_U32     GrbmStatus;     // GRBM_STATUS(0x8010) 原始快照（未映射 = 0）
+    ROK_U32     GuiActive;      // 解码：bit31 图形域忙
+    ROK_U32     CmdFifoAvail;   // 解码：命令 FIFO 空槽数（0-31）
+    ROK_U32     Reserved[2];    // 0
+} ROK_ESC_HW_INFO_OUT, *PROK_ESC_HW_INFO_OUT;
+
+// ---- CP 软复位结果（M3.2；escape 查询 11，写硬件，工具显式触发）----
+// 对 GRBM_SOFT_RESET(0x8020) 做 SOFT_RESET_CP 置位→停顿→清零脉冲，
+// 随后 WaitIdle。KMD 侧在 BAR0 未映射时拒绝（Status=0）。
+typedef struct _ROK_ESC_HW_RESET_OUT
+{
+    ROK_U32 Status;             // 1 = 序列完成且 WaitIdle 通过，0 = 拒绝/失败
+    ROK_U32 GrbmStatusBefore;   // 复位前 GRBM_STATUS（拒绝时为 0）
+    ROK_U32 GrbmStatusAfter;    // 复位后 GRBM_STATUS
+    ROK_U32 WaitIdleOk;         // 1 = 图形域回到空闲
+    ROK_U32 Reserved[4];        // 0
+} ROK_ESC_HW_RESET_OUT, *PROK_ESC_HW_RESET_OUT;
+
+// ---- 寄存器/CP 状态快照（M3.4a；escape 查询 12，只读，gfxinit.c 填充）----
 // 寄存器偏移见 kmd/src/regs_ts2.h（对照 Linux radeon r600d.h/evergreend.h）。
+// 与 type 10 的分工：10 = 启动期识别快照（存进适配器上下文的静态值），
+// 12 = 查询当下的完整寄存器面（ring 状态/ring test 结果/CP 细分状态）。
 // MMIO 不可达时各寄存器字段为 0，MmioSource 如实区分三态。
 // 结构必须 POD 且稳定：字段增删只能追加，两侧 C_ASSERT 防漂移。
 #define ROK_HW_SRC_NONE         0UL  // 无 MMIO（未映射）
@@ -234,57 +271,20 @@ C_ASSERT(sizeof(ROK_ESC_SEGMENT_INFO_OUT) == 32);
 C_ASSERT(sizeof(ROK_ESC_SIM_STATUS_OUT) == 296);
 C_ASSERT(sizeof(ROK_ESC_CCC_SETTINGS) == 32);
 C_ASSERT(sizeof(ROK_ESC_ENGINE_STATUS_OUT) == 32);
+C_ASSERT(sizeof(ROK_ESC_HW_INFO_OUT) == 48);
+C_ASSERT(sizeof(ROK_ESC_HW_RESET_OUT) == 32);
 C_ASSERT(sizeof(ROK_ESC_HW_STATUS_OUT) == 128);
 #endif
 
-// TeraScale 家族启发式（M3 用完整分发表替换）。
-// 依据 Linux 内核 radeon drm_pciids.h / pci.ids 核对（v0.2.1 实测修正：旧表
-// 把 Seymour 误标 0x6840 —— 那是 Thames 段；实机 HD 7470M = 0x6760 曾被
-// 误判 TS1）。
-//   0x6700-0x671F / 0x9900-0x99AF -> TeraScale 3（Cayman / Trinity）
-//   0x6750-0x675F（Turks/Lombok）、0x6760-0x677F（Seymour/Caicos）、
-//   0x6840-0x6849（Thames）、0x9400-0x98FF（Evergreen/NI/Sumo） -> TeraScale 2
-//   其余（0x79xx R600 早期、RV770 等）-> TeraScale 1
+// TeraScale 家族 ABI 值（QUERY_PCI_ID / QUERY_HW_INFO 的 Family 字段）。
+// 精确 DID→芯片分发表与兜底启发式自 M3.1 起迁至 kmd/src/r600hw.c
+// （RokHwLookupChip / RokHwFamilyHeuristic；源：Mesa r600_pci_ids.h，
+// 与 umd/gl46/gl46_r600g.c 的一致性由 scripts/check_pci_tables.py 机械校验）。
+// 勘误存档（v0.2.1 内联启发式时期，均已由精确表纠正）：
+//   * 旧段规则曾把 0x6840 标为 Seymour —— 实为 Thames/TURKS 段；
+//   * Mesa 表无 SEYMOUR 组：0x6760-0x677B 全归 CAICOS（HD 6490M = 0x6766
+//     亦在其中），实机 HD 7470M 候选 DID（0x6760 / 0x6779）均判 TS2；
+//   * 22 用例家族回归见 scripts/test_family.c（已迁移至新 API）。
 #define ROK_GPU_FAMILY_TS1  1
 #define ROK_GPU_FAMILY_TS2  2
 #define ROK_GPU_FAMILY_TS3  3
-
-static __inline
-ROK_U32
-RokGpuFamilyFromDeviceId(ROK_U32 DeviceId)
-{
-    switch (DeviceId)
-    {
-    case 0x6760:    // Seymour (HD 6400M/7400M) — 主验证卡（实机 HD 7470M DID）
-    case 0x6761:
-    case 0x6766:    // Caicos
-    case 0x6767:
-    case 0x6768:
-    case 0x6770:
-    case 0x6771:
-    case 0x6772:
-    case 0x6778:    // Caicos XT (HD 7470/8470 OEM)
-    case 0x6779:    // Caicos (HD 7470M) — 主验证卡
-    case 0x677B:
-    case 0x6840:    // Thames (HD 7600M/7700M)——旧表曾误标 Seymour
-    case 0x6841:
-        return ROK_GPU_FAMILY_TS2;
-    default:
-        break;
-    }
-    if ((DeviceId >= 0x6700 && DeviceId <= 0x672F) ||      // Cayman/Blackcomb
-        (DeviceId >= 0x9900 && DeviceId <= 0x99AF))        // Trinity
-    {
-        return ROK_GPU_FAMILY_TS3;
-    }
-    if ((DeviceId >= 0x6730 && DeviceId <= 0x674F) ||   // Barts（HD 6870/6850）
-        (DeviceId >= 0x6750 && DeviceId <= 0x677F) ||   // Turks/Lombok/Seymour/Caicos
-        (DeviceId >= 0x6840 && DeviceId <= 0x68FF) ||   // Thames/Evergreen/Cedar
-        (DeviceId >= 0x9440 && DeviceId <= 0x94BF) ||   // RV770/RV730/RV740
-        (DeviceId >= 0x9540 && DeviceId <= 0x955F) ||   // RV730/RV740 变体
-        (DeviceId >= 0x9640 && DeviceId <= 0x964F))     // Sumo（Llano 内显）
-    {
-        return ROK_GPU_FAMILY_TS2;
-    }
-    return ROK_GPU_FAMILY_TS1;          // R600/RV6xx/RV670/RS780/RS880 主段
-}

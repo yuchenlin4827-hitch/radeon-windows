@@ -56,7 +56,7 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
        reg add "<驱动键>\Parameters" /v EnableRing /t REG_DWORD /d 1 /f
 
      重启生效后，驱动会执行 Evergreen CP 初始化序列（微码写入/软复位/
-     ring 编程/ME_INIT/scratch 回环测试）。用 gpu_probe.exe [4.9] 段
+     ring 编程/ME_INIT/scratch 回环测试）。用 gpu_probe.exe [4.11] 段
      观测：`ring bring-up: PASS` 即 CP 已从 ring 取指。风险与边界见
      仓库 docs/bringup-safety.md 第 3.5 节。
 
@@ -64,7 +64,7 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
 ----------------------------------------------------------
   [1.7] PCI memory resources：用户态即可读到的 BAR 形态 —— TeraScale 卡
         预期 BAR0 = VRAM 孔径（>16MB）、BAR2 = MMIO 寄存器窗口（256-512KB）。
-  [4.9] QUERY_HW_STATUS：装了 rokmd 后的只读寄存器快照（VRAM/FB 地址/
+  [4.11] QUERY_HW_STATUS：装了 rokmd 后的只读寄存器快照（VRAM/FB 地址/
         GRBM/SRBM/CP 状态/ring test 结果）；非 rokmd 适配器报 0xC0000001
         系错误属预期。
 

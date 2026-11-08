@@ -1097,7 +1097,77 @@ RokDdiEscape(
         out->VendorId = adapter->PciVendorId;
         out->DeviceId = adapter->PciDeviceId;
         out->RevisionId = adapter->PciRevisionId;
-        out->Family = RokGpuFamilyFromDeviceId(adapter->PciDeviceId);
+        // M3.1 起：优先用 StartDevice 的精确表识别结果；未识别时回退
+        // 段范围启发式（适配器未经 StartDevice 的极端情况）。
+        out->Family = (adapter->HwChip.Family != 0)
+                          ? adapter->HwChip.Family
+                          : RokHwFamilyHeuristic(adapter->PciDeviceId);
+        return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_QUERY_HW_INFO:
+    {
+        PROK_ESC_HW_INFO_OUT out;
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_HW_INFO_OUT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_HW_INFO_OUT)(header + 1);
+        // 只读：识别快照 + GRBM_STATUS 现场重采样（BAR0 可用时比
+        // StartDevice 快照更新鲜；不可用则回落快照值，两者都为 0）。
+        RtlCopyMemory(out->ChipName, adapter->HwChip.Name,
+                      sizeof(out->ChipName));
+        out->Family = (adapter->HwChip.Family != 0)
+                          ? adapter->HwChip.Family
+                          : RokHwFamilyHeuristic(adapter->PciDeviceId);
+        out->Chip = adapter->HwChip.Chip;
+        out->RevisionId = adapter->PciRevisionId;
+        out->MmioMapped = (adapter->MmioVirtualAddress != NULL) ? 1 : 0;
+        if (!RokRegRead32(adapter->MmioVirtualAddress, adapter->MmioLength,
+                          ROK_GRBM_STATUS, &out->GrbmStatus))
+        {
+            out->GrbmStatus = adapter->HwGrbmStatus;
+        }
+        out->GuiActive = (out->GrbmStatus & ROK_GRBM_GUI_ACTIVE) ? 1 : 0;
+        out->CmdFifoAvail = out->GrbmStatus & ROK_GRBM_CMDFIFO_AVAIL_MASK;
+        out->Reserved[0] = 0;
+        out->Reserved[1] = 0;
+        return STATUS_SUCCESS;
+    }
+
+    case ROK_ESC_TYPE_HW_CP_RESET:
+    {
+        PROK_ESC_HW_RESET_OUT out;
+        ULONG before = 0, after = 0;
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_HW_RESET_OUT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_HW_RESET_OUT)(header + 1);
+        // M3.2：CP 域软复位（GRBM_SOFT_RESET 置位→停顿→清零→WaitIdle）。
+        // 仅在 BAR0 已映射时可执行；探针 --cp-reset 显式触发，运行时
+        // 路径（ResetFromTimeout）暂不接线，待 3.4 ring 提交落地。
+        if (adapter->MmioVirtualAddress == NULL)
+        {
+            out->Status = 0;
+            out->GrbmStatusBefore = 0;
+            out->GrbmStatusAfter = 0;
+            out->WaitIdleOk = 0;
+            RtlFillMemory(out->Reserved, sizeof(out->Reserved), 0);
+            return STATUS_SUCCESS;
+        }
+        out->Status = RokGrbmSoftResetCp(adapter->MmioVirtualAddress,
+                                         adapter->MmioLength,
+                                         &before, &after) ? 1 : 0;
+        out->GrbmStatusBefore = before;
+        out->GrbmStatusAfter = after;
+        out->WaitIdleOk = out->Status;
+        RtlFillMemory(out->Reserved, sizeof(out->Reserved), 0);
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+                   "rokmd: HW CP soft reset via escape: ok=%u before=%#x after=%#x\n",
+                   out->Status, out->GrbmStatusBefore, out->GrbmStatusAfter));
         return STATUS_SUCCESS;
     }
 
@@ -1130,7 +1200,8 @@ RokDdiEscape(
         out = (PROK_ESC_CAPS_OUT)(header + 1);
         out->CapsMask = ROK_CAP_PCI_ID_VALID | ROK_CAP_SEGMENT_QUERY |
                         ROK_CAP_ENGINE_STATUS_QUERY |   // M2.8：引擎状态查询可用
-                        ROK_CAP_HW_STATUS_QUERY;        // M3.4a：硬件状态快照可用
+                        ROK_CAP_HW_INFO_QUERY |         // M3.1：硬件信息查询可用
+                        ROK_CAP_HW_STATUS_QUERY;        // M3.4a：寄存器快照可用
         if (adapter->MmioVirtualAddress != NULL)
         {
             out->CapsMask |= ROK_CAP_MMIO_MAPPED;
@@ -1321,9 +1392,11 @@ RokDdiResetFromTimeout(
 {
     PAGED_CODE();
     UNREFERENCED_PARAMETER(hAdapter);
-    // TDR：OS 判定 GPU 挂死。即时完成模型不应触发；M3 实现
-    // GRBM 软复位 + ring 重置（对照 r600_gpu_reset）。返回成功让
-    // OS 继续标准恢复流程。
+    // TDR：OS 判定 GPU 挂死。即时完成模型不应触发；M3.2 已交付
+    // RokGrbmSoftResetCp（GRBM SOFT_RESET_CP 脉冲 + WaitIdle，宿主单测
+    // 覆盖），但 ring 重置/重初始化（3.4）未落地前不接线到本路径，
+    // 避免复位后无恢复动作的半状态。实机可用 gpu_probe --cp-reset
+    // 经 escape 类型 11 显式演练。返回成功让 OS 继续标准恢复流程。
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "rokmd: ResetFromTimeout\n"));
     return STATUS_SUCCESS;
 }

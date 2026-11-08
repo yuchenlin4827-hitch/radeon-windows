@@ -309,6 +309,11 @@ RokDdiStartDevice(
                    "rokmd: BAR0 unmapped — continue in pure render-only mode\n"));
     }
 
+    // 硬件识别快照（M3.1，r600hw.c）：精确分发表（120 个 TeraScale 2
+    // DID，源：Mesa r600_pci_ids.h）→ 启发式兜底；BAR0 已映射时只读
+    // 采样 GRBM_STATUS。无任何硬件写副作用。
+    RokHwIdentify(adapter);
+
     // 显存探测（M3.1）：模拟路径取注册表配置，真实路径读 CONFIG_MEMSIZE。
     RokAdapterProbeVram(adapter);
 

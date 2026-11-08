@@ -92,7 +92,7 @@ reg add "<驱动键>\Parameters" /v EnableRing /t REG_DWORD /d 1 /f
 5. scratch 回环测试：MMIO 写 0xCAFEDEAD → ring 发 SET_CONFIG_REG 包 →
    轮询该 scratch 变为 0xDEADBEEF。
 
-成功判据：`gpu_probe.exe` [4.9] 段打印
+成功判据：`gpu_probe.exe` [4.11] 段打印
 `rokmd ring: ready=1 ... test=PASS` 与
 `-> M3.4a ring bring-up: PASS`。
 

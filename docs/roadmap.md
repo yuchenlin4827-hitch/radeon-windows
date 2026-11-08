@@ -7,6 +7,8 @@
 > 2026-11 M2.8：WDDM 2.0 (0x5023) DDI 表全量补齐（机械验证无 NULL 成员）。
 > 2026-11 实机基线：HD 7470M（Win11 26100）上官方 Vulkan 栈实测不可用
 > （vk_audit v1.2：manifest/DLL 完整仍 -9），详见「实机基线」一节。
+> 2026-11-08 M3 第一批：3.1 寄存器直访 + 120 项 TS2 精确 PCI 表 +
+> 3.2 GRBM 状态/WaitIdle/CP 软复位（宿主单测 187 项，escape 类型 10/11）。
 
 每个阶段都有明确的"验收门"（DoD），未过验收不进入下一阶段。
 
@@ -81,7 +83,7 @@ QEMU ati-vga 路径）`pnputil /add-driver rokmd.inf /install` 后适配器以
 "代码 43（请求的资源未实现）"或"正常启动但无输出"状态稳定存在，**无 BSOD**；
 gpu_probe [4] 段对 rokmd 适配器回显版本/PCI/能力/段/模拟状态/CCC。
 
-## M3 —— KMD 基础硬件能力 ⬜
+## M3 —— KMD 基础硬件能力 🚧（第一批 3.1 全量 + 3.2 GRBM 段已交付）
 
 **目标**：KMD 真正"认识"目标硬件（**HD 6490M = Seymour / HD 7470M = Caicos，
 TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
@@ -96,6 +98,25 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 | 3.4 | CP ring + PM4：RING_INIT、INDIRECT_BUFFER 提交 | `r600_cp.c`、`ni_dma` |
 | 3.5 | IH 中断环 + `DxgkDdiInterruptRoutine` 接线 | `evergreen_irq.c` |
 | 3.6 | VidMm 对接：CreateAllocation/MakeResident/Evict/BuildPagingBuffer | 上 3.3 |
+
+**进展（2026-11-08，第一批）**：
+
+- ✅ 3.1 寄存器直访封装 `kmd/src/r600hw.c`：RokRegRead32/Write32（BAR0
+  边界检查，NULL/非对齐/越界一律拒绝）；精确 PCI 分发表 120 个
+  Evergreen 家族 DID（源：Mesa r600_pci_ids.h，MIT；与 umd/gl46 表
+  一致性由 scripts/check_pci_tables.py 机械校验），替换 rok_escape.h
+  旧启发式（并修正其 0x6840 误标 Seymour —— Mesa 实归 TURKS）。
+  MM_INDEX/MM_DATA 间接寻址推迟至 3.3：总线空间语义尚待权威出处
+  核实，BAR0 直访已覆盖 GRBM 域，不把未核实常量写进内核。
+- ✅ 3.2（GRBM 段）GRBM_STATUS 解码 / WaitIdle（10µs × 10000 轮上限）/
+  CP 域软复位脉冲（GRBM_SOFT_RESET 0x8020 = SOFT_RESET_CP，置位→停顿
+  100µs→清零→WaitIdle；地址/位域取证：Linux radeon r600d.h v6.6）。
+  MC 段 ⬜ 随 3.3。
+- ✅ escape 类型 10（QUERY_HW_INFO，只读识别快照 + GRBM 采样）/ 11
+  （HW_CP_RESET，gpu_probe --cp-reset 显式触发；ResetFromTimeout 待
+  3.4 ring 重置落地后接线）；gpu_probe [4.9]/[4.10]。
+- 宿主单测 78 → 187（芯片表不变量/边界/解码/超时路径/复位序列寄存器
+  轨迹，kmock 新增 MMIO mock + 停顿计数）。
 
 **验收门**：KMD 日志完整走通"探测 → 复位 → ring 空转 → 收到一条 IH 中断"；
 提交 NOP IB 无 TDR。
@@ -130,9 +151,9 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
   对硬件零写入，WDDM 提交保持即时完成模型（零 TDR 风险）。真实模式
   执行门槛：非 sim + BAR0 已映射 + TS2 家族 + 孔径存在 +
   `MC_VM_FB_LOCATION` 非 0。
-- **观测通道**：escape v1 追加 `QUERY_HW_STATUS (type 10)`（只读快照 27 个
+- **观测通道**：escape v1 追加 `QUERY_HW_STATUS (type 12)`（只读快照 29 个
   寄存器/状态字段，真实/模拟/无 MMIO 三态如实标注）；gpu_probe 新增
-  [1.7]（cfgmgr32 资源/BAR 形态，用户态即可）与 [4.9]（硬件状态）。
+  [1.7]（cfgmgr32 资源/BAR 形态，用户态即可）与 [4.11]（寄存器快照）。
 - **PM4 count 语义修正**：sim.c 解码器与 ddi.c 注释对齐内核
   `r600_cs.c` 解析器（包总长 = count 字段 + 2，包体 = count+1）——
   旧实现少算 1 dword，M4 ICD 生成命令流前必须钉死此语义。

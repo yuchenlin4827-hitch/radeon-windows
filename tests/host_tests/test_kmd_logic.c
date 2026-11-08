@@ -11,6 +11,7 @@
 #include "adapter.h"
 #include "sim.h"
 #include "ccc.h"
+#include "r600hw.h"
 #include "gfxinit.h"
 
 #include <stdlib.h>
@@ -479,22 +480,22 @@ static void TestRegAccessAndStatus(void)
     CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
     CHECK(a.SimulationMode == TRUE);
 
-    RokRegWrite32(&a, 0x5428, 0x40000);           // CONFIG_MEMSIZE = 256MB(KB)
-    CHECK(RokRegRead32(&a, 0x5428) == 0x40000);
-    RokRegWrite32(&a, 0x8010, 0x8000001Fu);       // GRBM_STATUS
-    CHECK(RokRegRead32(&a, 0x8010) == 0x8000001Fu);
+    RokDevRegWrite32(&a, 0x5428, 0x40000);           // CONFIG_MEMSIZE = 256MB(KB)
+    CHECK(RokDevRegRead32(&a, 0x5428) == 0x40000);
+    RokDevRegWrite32(&a, 0x8010, 0x8000001Fu);       // GRBM_STATUS
+    CHECK(RokDevRegRead32(&a, 0x8010) == 0x8000001Fu);
     // 越界安全：64KB 窗口外读写零副作用。
-    CHECK(RokRegRead32(&a, 0xFFF0) == 0);
-    RokRegWrite32(&a, 0xFFF0, 0x12345678);        // 不得崩溃/不得写
+    CHECK(RokDevRegRead32(&a, 0xFFF0) == 0);
+    RokDevRegWrite32(&a, 0xFFF0, 0x12345678);        // 不得崩溃/不得写
     // NULL 适配器 / 真实模式无 MMIO：零副作用。
-    CHECK(RokRegRead32(NULL, 0x5428) == 0);
-    RokRegWrite32(NULL, 0x5428, 1);
+    CHECK(RokDevRegRead32(NULL, 0x5428) == 0);
+    RokDevRegWrite32(NULL, 0x5428, 1);
 
     TEST_BEGIN("[6b] RokGfxProbeStatus — sim snapshot");
     {
         // fbLoc = (end>>24)<<16 | (start>>24) = (0x90<<16)|0x80 = 0x00900080。
         ROK_U32 fbLoc = (0x90u << 16) | 0x80u;
-        RokRegWrite32(&a, 0x2180, fbLoc);         // MC_VM_FB_LOCATION 预置
+        RokDevRegWrite32(&a, 0x2180, fbLoc);         // MC_VM_FB_LOCATION 预置
         CHECK(RokGfxProbeStatus(&a, &hw) == STATUS_SUCCESS);
         CHECK(hw.MmioSource == ROK_HW_SRC_SIM);
         CHECK(hw.MmioLength == 0x10000);
@@ -538,7 +539,7 @@ static void TestRingRehearse(void)
     CHECK(RokSimInitialize(&a, NULL) == STATUS_SUCCESS);
     // MC_VM_FB_LOCATION 预置（真实模式由 VBIOS/前驱动配置；演练由测试预置）：
     // start=0x80000000，end=0x90000000 → 原值 0x00900080。
-    RokRegWrite32(&a, 0x2180, (0x90u << 16) | 0x80u);
+    RokDevRegWrite32(&a, 0x2180, (0x90u << 16) | 0x80u);
 
     CHECK(RokRingHardwareInit(&a, TRUE) == STATUS_SUCCESS);
 
@@ -551,19 +552,19 @@ static void TestRingRehearse(void)
     CHECK(a.Ring.GpuAddr == 0x80800000ULL);       // 演练 fbBase 0x80000000 + 8MB
 
     // 寄存器终值逐一核对（evergreen_cp_resume + cp_start 移植面）。
-    CHECK(RokRegRead32(&a, 0x86D8) == 0xFF);      // CP_ME_CNTL unhalt（最后写入）
-    CHECK(RokRegRead32(&a, 0x8020) == 0);         // GRBM_SOFT_RESET 已清零
-    CHECK(RokRegRead32(&a, 0xC100) == 0x00808000u); // CP_RB_BASE = 0x80800000>>8
+    CHECK(RokDevRegRead32(&a, 0x86D8) == 0xFF);      // CP_ME_CNTL unhalt（最后写入）
+    CHECK(RokDevRegRead32(&a, 0x8020) == 0);         // GRBM_SOFT_RESET 已清零
+    CHECK(RokDevRegRead32(&a, 0xC100) == 0x00808000u); // CP_RB_BASE = 0x80800000>>8
     {
-        ROK_U32 cntl = RokRegRead32(&a, 0xC104);
+        ROK_U32 cntl = RokDevRegRead32(&a, 0xC104);
         CHECK((cntl & 0x1F) == 12);               // RB_BUFSZ
         CHECK(((cntl >> 8) & 0x3F) == 9);         // RB_BLKSZ
         CHECK((cntl & (1u << 27)) != 0);          // RB_NO_UPDATE
         CHECK((cntl & (1u << 31)) == 0);          // RPTR_WR_ENA 已撤
     }
-    CHECK(RokRegRead32(&a, 0x8540) == 0);         // SCRATCH_UMSK = 0
-    CHECK(RokRegRead32(&a, 0xC114) == 10);        // CP_RB_WPTR = 7(ME_INIT)+3(测试包)
-    CHECK(RokRegRead32(&a, 0x8518) == 0xDEADBEEFu); // SCRATCH_REG6 = ring test 哨兵
+    CHECK(RokDevRegRead32(&a, 0x8540) == 0);         // SCRATCH_UMSK = 0
+    CHECK(RokDevRegRead32(&a, 0xC114) == 10);        // CP_RB_WPTR = 7(ME_INIT)+3(测试包)
+    CHECK(RokDevRegRead32(&a, 0x8518) == 0xDEADBEEFu); // SCRATCH_REG6 = ring test 哨兵
     CHECK(a.RingTestValue == 0xDEADBEEFu);
     CHECK(a.RingTestRetries == 0);                // 演练首轮命中
 
@@ -585,7 +586,7 @@ static void TestRingRehearse(void)
 
     TEST_BEGIN("[7c] stop halts CP and releases ring");
     RokRingHardwareStop(&a);
-    CHECK(RokRegRead32(&a, 0x86D8) ==
+    CHECK(RokDevRegRead32(&a, 0x86D8) ==
           ((1u << 28) | (1u << 26)));             // ME_HALT | PFP_HALT
     CHECK(a.Ring.CpuVa == NULL);
     CHECK(a.Ring.HwProgrammed == FALSE);
@@ -606,6 +607,234 @@ static void TestRingRehearse(void)
     RokRingHardwareStop(&a);                      // 未初始化时零副作用
 }
 
+// ==================================================================
+// [5] r600hw — M3.1 芯片识别 / 寄存器直访 + M3.2 GRBM 序列
+// ==================================================================
+
+// 读钩子：第 N 次读 GRBM_STATUS 起空闲（模拟复位完成后 GUI_ACTIVE 清零）。
+static long s_grbm_reads;
+static long s_grbm_idle_at;
+static ULONG HookGrbmIdleAfterN(ULONG offset, ULONG value)
+{
+    if (offset == ROK_GRBM_STATUS)
+    {
+        s_grbm_reads++;
+        if (s_grbm_reads >= s_grbm_idle_at)
+        {
+            value &= ~ROK_GRBM_GUI_ACTIVE;
+        }
+        else
+        {
+            value |= ROK_GRBM_GUI_ACTIVE;
+        }
+    }
+    return value;
+}
+
+// 读钩子：恒忙（超时路径）。
+static ULONG HookGrbmAlwaysBusy(ULONG offset, ULONG value)
+{
+    if (offset == ROK_GRBM_STATUS)
+    {
+        value |= ROK_GRBM_GUI_ACTIVE;
+    }
+    return value;
+}
+
+static void TestHwChipTable(void)
+{
+    ROK_HW_CHIP_INFO info;
+
+    TEST_BEGIN("[5a] hw chip table — 主验证卡与各代表组");
+    CHECK(RokHwLookupChip(0x6779, &info) == TRUE);          // HD 7470 主验证卡
+    CHECK(info.Family == ROK_GPU_FAMILY_TS2);
+    CHECK(info.Chip == ROK_HW_CHIP_CAICOS);
+    CHECK(strcmp(info.Name, "CAICOS") == 0);
+
+    CHECK(RokHwLookupChip(0x6766, &info) == TRUE);          // HD 6490M（同归 CAICOS）
+    CHECK(info.Chip == ROK_HW_CHIP_CAICOS);
+
+    CHECK(RokHwLookupChip(0x6840, &info) == TRUE);          // Mesa 归 TURKS（旧注释误标 Seymour）
+    CHECK(info.Chip == ROK_HW_CHIP_TURKS);
+    CHECK(strcmp(info.Name, "TURKS") == 0);
+
+    CHECK(RokHwLookupChip(0x6720, &info) == TRUE);
+    CHECK(info.Chip == ROK_HW_CHIP_BARTS);
+    CHECK(RokHwLookupChip(0x68A0, &info) == TRUE);
+    CHECK(info.Chip == ROK_HW_CHIP_JUNIPER);
+    CHECK(RokHwLookupChip(0x68E0, &info) == TRUE);
+    CHECK(info.Chip == ROK_HW_CHIP_CEDAR);
+    CHECK(RokHwLookupChip(0x9640, &info) == TRUE);
+    CHECK(info.Chip == ROK_HW_CHIP_SUMO);
+    CHECK(RokHwLookupChip(0x9642, &info) == TRUE);
+    CHECK(info.Chip == ROK_HW_CHIP_SUMO2);
+    CHECK(RokHwLookupChip(0x9802, &info) == TRUE);
+    CHECK(info.Chip == ROK_HW_CHIP_PALM);
+
+    // 未收录 DID / 参数守卫。
+    CHECK(RokHwLookupChip(0x5046, &info) == FALSE);          // QEMU ati-vga
+    CHECK(RokHwLookupChip(0x0000, &info) == FALSE);
+    CHECK(RokHwLookupChip(0x6779, NULL) == FALSE);
+
+    // 启发式兜底（规则与迁移前 rok_escape.h 内联一致）。
+    CHECK(RokHwFamilyHeuristic(0x6718) == ROK_GPU_FAMILY_TS3);   // Cayman 段
+    CHECK(RokHwFamilyHeuristic(0x9900) == ROK_GPU_FAMILY_TS3);   // Trinity 段
+    CHECK(RokHwFamilyHeuristic(0x9490) == ROK_GPU_FAMILY_TS2);   // RV7xx 主段
+    CHECK(RokHwFamilyHeuristic(0x7100) == ROK_GPU_FAMILY_TS1);   // R600 早期
+    CHECK(RokHwFamilyHeuristic(0x5046) == ROK_GPU_FAMILY_TS1);   // 未收录兜底
+    // TS1 边界守卫（test_family.c 迁移回归曾抓到宽段 0x9400-0x9900 误吞）：
+    // 这些段紧邻 TS2 区间，合并时切勿并宽。
+    CHECK(RokHwFamilyHeuristic(0x9400) == ROK_GPU_FAMILY_TS1);   // R600 HD 2900
+    CHECK(RokHwFamilyHeuristic(0x94C5) == ROK_GPU_FAMILY_TS1);   // RV620 HD 3450
+    CHECK(RokHwFamilyHeuristic(0x9615) == ROK_GPU_FAMILY_TS1);   // RS780 HD 3200
+    CHECK(RokHwFamilyHeuristic(0x9712) == ROK_GPU_FAMILY_TS1);   // RS880 HD 4250
+
+    // 段边界采样（全表升序/无重复由 scripts/check_pci_tables.py 机械校验）。
+    TEST_BEGIN("[5a2] hw chip table — 段边界");
+    CHECK(RokHwLookupChip(0x673E, &info) == TRUE && info.Chip == ROK_HW_CHIP_BARTS);
+    CHECK(RokHwLookupChip(0x675F, &info) == TRUE && info.Chip == ROK_HW_CHIP_TURKS);
+    CHECK(RokHwLookupChip(0x677B, &info) == TRUE && info.Chip == ROK_HW_CHIP_CAICOS);
+    CHECK(RokHwLookupChip(0x6859, &info) == TRUE && info.Chip == ROK_HW_CHIP_TURKS);
+    CHECK(RokHwLookupChip(0x68FE, &info) == TRUE && info.Chip == ROK_HW_CHIP_CEDAR);
+    CHECK(RokHwLookupChip(0x964F, &info) == TRUE && info.Chip == ROK_HW_CHIP_SUMO);
+    CHECK(RokHwLookupChip(0x980A, &info) == TRUE && info.Chip == ROK_HW_CHIP_PALM);
+
+    // 名字表全覆盖。
+    TEST_BEGIN("[5a3] hw chip name — 全枚举");
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_CEDAR), "CEDAR") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_REDWOOD), "REDWOOD") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_JUNIPER), "JUNIPER") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_CYPRESS), "CYPRESS") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_HEMLOCK), "HEMLOCK") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_BARTS), "BARTS") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_TURKS), "TURKS") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_CAICOS), "CAICOS") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_PALM), "PALM") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_SUMO), "SUMO") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_SUMO2), "SUMO2") == 0);
+    CHECK(strcmp(RokHwChipName(ROK_HW_CHIP_UNKNOWN), "UNKNOWN") == 0);
+    CHECK(strcmp(RokHwChipName(0xDEAD), "UNKNOWN") == 0);
+}
+
+static void TestRegAccess(void)
+{
+    ULONG v = 0;
+
+    TEST_BEGIN("[5b] reg access — 边界检查（绝不触碰越界地址）");
+    rok_mock_mmio_reset();
+    CHECK(RokRegRead32(NULL, 0x1000, 0x0, &v) == FALSE);           // NULL 基址
+    CHECK(RokRegWrite32(NULL, 0x1000, 0x0, 1) == FALSE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0x2, &v) == FALSE);   // 非对齐
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x1000, 0x1, 1) == FALSE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0xFFD, &v) == FALSE); // 差 3
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0xFFC, &v) == TRUE);  // 最后一格恰好可用
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0x1000, &v) == FALSE);// == 长度即越界
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0x2000, &v) == FALSE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0, 0, &v) == FALSE);          // 零长窗口
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0x0, NULL) == FALSE); // NULL 出参
+
+    TEST_BEGIN("[5b2] reg access — 读写 roundtrip");
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x1000, 0x40, 0xDEADBEEF) == TRUE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0x40, &v) == TRUE);
+    CHECK(v == 0xDEADBEEF);
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x1000, 0xFFD, 7) == FALSE); // 写同样受限
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x1000, 0x1000, 7) == FALSE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x1000, 0x40, &v) == TRUE);
+    CHECK(v == 0xDEADBEEF);                                         // 拒绝的写未落地
+}
+
+static void TestGrbm(void)
+{
+    ULONG v = 0, stalls = 0;
+    ROK_ADAPTER a;
+
+    TEST_BEGIN("[5c] GRBM decode — GUI_ACTIVE / CMDFIFO_AVAIL");
+    rok_mock_mmio_reset();
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x10000, ROK_GRBM_STATUS, 0xC0000015) == TRUE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x10000, ROK_GRBM_STATUS, &v) == TRUE);
+    CHECK((v & ROK_GRBM_GUI_ACTIVE) != 0);
+    CHECK((v & ROK_GRBM_CMDFIFO_AVAIL_MASK) == 0x15);
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x10000, ROK_GRBM_STATUS, 0x0000801F) == TRUE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x10000, ROK_GRBM_STATUS, &v) == TRUE);
+    CHECK((v & ROK_GRBM_GUI_ACTIVE) == 0);
+    CHECK((v & ROK_GRBM_CMDFIFO_AVAIL_MASK) == 0x1F);
+
+    TEST_BEGIN("[5d] GRBM WaitIdle — 时空闲 / 延迟空闲 / 超时 / 参数守卫");
+    rok_mock_mmio_reset();
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x10000, ROK_GRBM_STATUS, 0) == TRUE);
+    CHECK(RokGrbmWaitIdle(rok_mock_mmio, 0x10000, 8, &stalls) == TRUE);
+    CHECK(stalls == 0);                                   // 首读即空闲
+    CHECK(rok_mock_stall_count == 0);                     // 未停顿
+
+    rok_mock_mmio_reset();
+    s_grbm_reads = 0; s_grbm_idle_at = 3;                 // 第 3 次读起空闲
+    rok_mock_reg_read_hook = HookGrbmIdleAfterN;
+    CHECK(RokGrbmWaitIdle(rok_mock_mmio, 0x10000, 10, &stalls) == TRUE);
+    CHECK(stalls == 2);                                   // 忙轮询 2 轮
+    CHECK(rok_mock_stall_count == 2);
+    CHECK(rok_mock_stall_us_total == 20);                 // 每轮 10µs
+
+    rok_mock_mmio_reset();
+    rok_mock_reg_read_hook = HookGrbmAlwaysBusy;
+    CHECK(RokGrbmWaitIdle(rok_mock_mmio, 0x10000, 5, &stalls) == FALSE);
+    CHECK(stalls == 5);                                   // 超时上报满轮数
+    CHECK(rok_mock_stall_count == 5);
+    rok_mock_reg_read_hook = NULL;
+
+    CHECK(RokGrbmWaitIdle(rok_mock_mmio, 0x10000, 0, &stalls) == FALSE); // MaxPolls=0
+    CHECK(RokGrbmWaitIdle(NULL, 0x10000, 8, NULL) == FALSE);             // NULL 基址
+
+    TEST_BEGIN("[5e] GRBM CP 软复位 — 成功序列 / 超时清理 / 拒绝路径");
+    rok_mock_mmio_reset();
+    CHECK(RokGrbmSoftResetCp(rok_mock_mmio, 0x10000, &v, &stalls) == TRUE);
+    CHECK((v & ROK_GRBM_GUI_ACTIVE) == 0);                // before 快照：空闲
+    CHECK(RokRegRead32(rok_mock_mmio, 0x10000, ROK_GRBM_SOFT_RESET, &stalls) == TRUE);
+    CHECK(stalls == 0);                                   // 脉冲结束必须清零
+    CHECK(rok_mock_stall_us_total == 100);                // 100µs 脉冲停顿（首轮即空闲）
+
+    rok_mock_mmio_reset();
+    s_grbm_reads = 0; s_grbm_idle_at = 2;                 // 复位脉冲后第 2 次读起空闲
+    rok_mock_reg_read_hook = HookGrbmIdleAfterN;
+    CHECK(RokGrbmSoftResetCp(rok_mock_mmio, 0x10000, NULL, NULL) == TRUE);
+    CHECK(RokRegRead32(rok_mock_mmio, 0x10000, ROK_GRBM_SOFT_RESET, &v) == TRUE);
+    CHECK(v == 0);
+    rok_mock_reg_read_hook = NULL;
+
+    rok_mock_mmio_reset();
+    rok_mock_reg_read_hook = HookGrbmAlwaysBusy;
+    CHECK(RokGrbmSoftResetCp(rok_mock_mmio, 0x10000, &v, &stalls) == FALSE); // WaitIdle 超时
+    CHECK(RokRegRead32(rok_mock_mmio, 0x10000, ROK_GRBM_SOFT_RESET, &v) == TRUE);
+    CHECK(v == 0);                                        // 超时路径同样清零（不留半脉冲）
+    rok_mock_reg_read_hook = NULL;
+
+    CHECK(RokGrbmSoftResetCp(NULL, 0x10000, NULL, NULL) == FALSE);           // NULL 基址
+
+    TEST_BEGIN("[5f] RokHwIdentify — 精确表 / 兜底 / MMIO 快照");
+    rok_mock_mmio_reset();
+    MakeAdapter(&a, 0x1002, 0x6779);
+    RokHwIdentify(&a);
+    CHECK(a.HwChip.Family == ROK_GPU_FAMILY_TS2);
+    CHECK(a.HwChip.Chip == ROK_HW_CHIP_CAICOS);
+    CHECK(strcmp(a.HwChip.Name, "CAICOS") == 0);
+    CHECK(a.HwGrbmStatus == 0);                           // BAR0 未映射 → 快照 0
+
+    MakeAdapter(&a, 0x1002, 0x5046);                      // 未收录 → 启发式
+    RokHwIdentify(&a);
+    CHECK(a.HwChip.Chip == ROK_HW_CHIP_UNKNOWN);
+    CHECK(strcmp(a.HwChip.Name, "UNKNOWN") == 0);
+    CHECK(a.HwChip.Family == ROK_GPU_FAMILY_TS1);
+
+    MakeAdapter(&a, 0x1002, 0x6779);                      // BAR0 映射 → GRBM 快照
+    a.MmioVirtualAddress = rok_mock_mmio;
+    a.MmioLength = 0x10000;
+    CHECK(RokRegWrite32(rok_mock_mmio, 0x10000, ROK_GRBM_STATUS, 0x80000003) == TRUE);
+    RokHwIdentify(&a);
+    CHECK(a.HwGrbmStatus == 0x80000003);
+
+    RokHwIdentify(NULL);                                  // NULL 守卫（无崩溃即过）
+    CHECK(1);
+}
+
 int main(void)
 {
     // 环境：接管 cpuid（与本沙箱是否在 KVM 里无关，用例自定状态）。
@@ -616,12 +845,17 @@ int main(void)
     printf("rokmd host unit tests — logic parity with kmd/src bytes\n");
     C_ASSERT(sizeof(ROK_CCC_SETTINGS) == 32);
     C_ASSERT(sizeof(ROK_SIM_STATS) == 284);   // 7×ULONG/UINT32 + 64×ULONG，见 sim.h
-    C_ASSERT(sizeof(ROK_ESC_HW_STATUS_OUT) == 128);
+    C_ASSERT(sizeof(ROK_ESC_HW_INFO_OUT) == 48);    // M3.1 新增报文
+    C_ASSERT(sizeof(ROK_ESC_HW_RESET_OUT) == 32);   // M3.2 新增报文
+    C_ASSERT(sizeof(ROK_ESC_HW_STATUS_OUT) == 128); // M3.4a 新增报文
 
     TestPm4Decode();
     TestCccImport();
     TestCccSetGet();
     TestSimDecision();
+    TestHwChipTable();
+    TestRegAccess();
+    TestGrbm();
     TestRingMath();
     TestRegAccessAndStatus();
     TestRingRehearse();
