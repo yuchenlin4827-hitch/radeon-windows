@@ -113,6 +113,7 @@
     <ClCompile Include="src\ddi.c" />
     <ClCompile Include="src\sim.c" />
     <ClCompile Include="src\ccc.c" />
+    <ClCompile Include="src\r600hw.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\precomp.h" />
@@ -121,6 +122,7 @@
     <ClInclude Include="src\rok_escape.h" />
     <ClInclude Include="src\sim.h" />
     <ClInclude Include="src\ccc.h" />
+    <ClInclude Include="src\r600hw.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="rokmd.inf" />
