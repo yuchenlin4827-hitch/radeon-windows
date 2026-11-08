@@ -3,24 +3,34 @@
 #
 # 用法（管理员 PowerShell）：
 #   .\install-terakan.ps1 -DllPath C:\build\terakan_icd.dll
+# 免管理员（Per-User，写入 HKCU —— Vulkan loader 同样枚举该键）：
+#   .\install-terakan.ps1 -DllPath C:\build\terakan_icd.dll -PerUser
 #
 # 行为：
-#   1. 复制 terakan_icd.dll 到目标目录（默认 %WINDIR%\System32）；
+#   1. 复制 terakan_icd.dll 到目标目录（系统级默认 %WINDIR%\System32，
+#      Per-User 默认 %LOCALAPPDATA%\terakan）；
 #   2. 复制/改写 ICD JSON（library_path 指向 DLL 实际位置）；
-#   3. 在 HKLM\SOFTWARE\Khronos\Vulkan\Drivers 注册 JSON 路径
-#      （Vulkan loader 的 Windows ICD 发现机制）；
+#   3. 在 Khronos\Vulkan\Drivers 注册 JSON 路径
+#      （HKLM 系统级 / HKCU 用户级，Vulkan loader 的 Windows ICD 发现机制）；
 #   4. 验证：运行 vk_smoke.exe / gpu_probe.exe 核对枚举结果。
 #
 # 卸载：-Uninstall 开关（删除注册表值 + 可选删文件）。
 param(
     [string]$DllPath = "",
-    [string]$InstallDir = "$env:WINDIR\System32",
+    [string]$InstallDir = "",
+    [switch]$PerUser,
     [switch]$Uninstall
 )
 
 $ErrorActionPreference = "Stop"
 
-$RegPath = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+if ($PerUser) {
+    $RegPath = "HKCU:\Software\Khronos\Vulkan\Drivers"
+    if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA "terakan" }
+} else {
+    $RegPath = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+    if (-not $InstallDir) { $InstallDir = "$env:WINDIR\System32" }
+}
 $JsonName = "terakan_icd.x86_64.json"
 
 if ($Uninstall) {
@@ -45,6 +55,10 @@ if (-not $DllPath) {
 
 if (-not (Test-Path $DllPath)) {
     Write-Error "找不到 ICD DLL: $DllPath"
+}
+
+if (-not (Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
 # 1. 复制 DLL
@@ -77,3 +91,5 @@ Write-Host "安装完成。验证步骤："
 Write-Host "  1. gpu_probe.exe   —— [2] WDDM adapters 应列出 UMD；[3] Vulkan 枚举 AMD 物理设备"
 Write-Host "  2. vk_smoke.exe    —— 端到端 compute（PASS = 全链路打通）"
 Write-Host "  3. vkcube.exe      —— 出三角（M1 验收门）"
+Write-Host "临时切换（不写注册表）：新版 loader 用 VK_DRIVER_FILES，旧版用 VK_ICD_FILENAMES："
+Write-Host "  `$env:VK_DRIVER_FILES = '$jsonPath'"

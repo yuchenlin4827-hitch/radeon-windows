@@ -4,6 +4,8 @@
 //
 // 字段名与 d3dkmddi.h/dispmprt.h 的 DRIVER_INITIALIZATION_DATA 逐一对齐；
 // DDI 原型见 adapter.h（生命周期）与 ddi.h（其余，由 scripts/gen_ddi2.py 生成）。
+// M2.8：0x5023（WDDM 2.0）范围内成员全量注册，无 NULL 项 —— 对照
+// WDK 26100 dispmprt.h 的 DRIVER_INITIALIZATION_DATA 逐成员核对。
 #include "precomp.h"
 #include "adapter.h"
 #include "ddi.h"
@@ -45,6 +47,9 @@ DriverEntry(
     g_DdiData.DxgkDdiNotifyAcpiEvent       = RokDdiNotifyAcpiEvent;
     g_DdiData.DxgkDdiQueryInterface        = RokDdiQueryInterface;
     g_DdiData.DxgkDdiGetChildContainerId   = RokDdiGetChildContainerId;
+
+    // LDA 链接协商（基础成员）：单适配器驱动明确拒绝，避免 NULL 成员。
+    g_DdiData.DxgkDdiLinkDevice = RokDdiLinkDevice;
 
     // ---- 适配器 / 分配 / 提交 ----
     g_DdiData.DxgkDdiQueryAdapterInfo                  = RokDdiQueryAdapterInfo;
@@ -109,6 +114,15 @@ DriverEntry(
 #if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WIN8)
     g_DdiData.DxgkDdiNotifySurpriseRemoval     = RokDdiNotifySurpriseRemoval;
 
+    // 电源组件 / PEP 通道（WIN8 成员）：未注册电源组件时不可达，
+    // 但成员必须非空以保证 0x5023 版本校验全表无 NULL（M2.8）。
+    g_DdiData.DxgkDdiSetPowerComponentFState  = RokDdiSetPowerComponentFState;
+    g_DdiData.DxgkDdiPowerRuntimeControlRequest = RokDdiPowerRuntimeControlRequest;
+
+    // MPO v1 翻转（WIN8 成员）：0 路 source 下不可达，与 MPO2 同款保签名。
+    g_DdiData.DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay =
+        RokDdiSetVidPnSourceAddressWithMultiPlaneOverlay;
+
     // POST 所有权释放 / 系统显示（蓝屏渲染路径；本驱动不持有 POST，
     // 显式拒绝即可，但成员必须非空以保证 DDI 表完整）。
     g_DdiData.DxgkDdiStopDeviceAndReleasePostDisplayOwnership =
@@ -124,6 +138,9 @@ DriverEntry(
     g_DdiData.DxgkDdiCheckMultiPlaneOverlaySupport = RokDdiCheckMultiPlaneOverlaySupport;
     g_DdiData.DxgkDdiCalibrateGpuClock        = RokDdiCalibrateGpuClock;
     g_DdiData.DxgkDdiFormatHistoryBuffer      = RokDdiFormatHistoryBuffer;
+
+    // P-state 切换（WDDM 1.3 面电源管理；无时钟控制路径，确定性拒绝）。
+    g_DdiData.DxgkDdiSetPowerPState = RokDdiSetPowerPState;
 #endif
 
 #if (DXGKDDI_INTERFACE_VERSION >= DXGKDDI_INTERFACE_VERSION_WDDM2_0)

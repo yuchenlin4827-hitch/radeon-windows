@@ -55,6 +55,25 @@
 - **M5**：terakan 的 Vulkan 版本上限决定 Zink/GL4.6 可达性（当前 1.0 →
   需要先把 1.3 关键特性补齐，才谈 GL 4.6）。
 
+## M4 通道就绪状态（自研 KMD ⇄ ICD 契约，2026-11）
+
+M2.8 起，`kmd/src/rok_escape.h`（v1 查询面）已是 KMD/gpu_probe/未来 ICD
+三方同源的 ABI 契约头，terakan 接自研 KMD 时可直接编译复用：
+
+| Escape 类型 | 内容 | ICD 用途 |
+| --- | --- | --- |
+| 1 QUERY_VERSION | KMD 版本 + WDDM DDI 版本（0x5023） | 识别 rokmd、协商能力 |
+| 2 QUERY_PCI_ID | VID/DID/REV + TeraScale 家族号 | 装载期 ASIC 分发表键值 |
+| 3 QUERY_VRAM / 5 QUERY_SEGMENT_INFO | VRAM/GTT 尺寸 + 段号（M3 填充） | VkMemoryHeap/Type 布局 |
+| 4 QUERY_CAPS | 能力位（MMIO/段/模拟/引擎状态查询） | 特性门控 |
+| 6 QUERY_SIM_STATUS | 模拟设备 PM4 解码直方图 | VM 联调 |
+| 7/8 CCC get/set | Catalyst 设置兼容 | ADL shim |
+| 9 QUERY_ENGINE_STATUS（M2.8 新增） | submitted/completed fence、in-flight、提交/分页计数、Responsive | **fence 进度轮询通道**（M3 接 IH 前的回收判据） |
+
+安装侧：`umd/install-terakan.ps1` 支持系统级（HKLM，需管理员）与
+`-PerUser`（HKCU，免管理员）两种 ICD 注册；临时测试可用
+`VK_DRIVER_FILES`（loader ≥ 1.3.207）或旧名 `VK_ICD_FILENAMES`。
+
 ## 参考链接
 
 - Phoronix: 《Open-Source "Terakan" Vulkan Driver For Radeon HD 6000 Series

@@ -6,9 +6,11 @@
    - 源：`https://gitlab.freedesktop.org/Triang3l/mesa`（terakan 子树）
    - 产物：`terakan_icd.dll` + `terakan_icd.x86_64.json`（Vulkan ICD 清单）
    - 安装：`install-terakan.ps1`（复制 DLL、写 ICD JSON、注册到
-     `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` —— Vulkan loader 的 Windows
-     ICD 发现机制），或临时设置环境变量
-     `VK_ICD_FILENAMES=<json 路径>` 直接测试；
+     `HKLM\SOFTWARE\Khronos\Vulkan\Drivers`（系统级，需管理员）或
+     `-PerUser` 写 `HKCU\Software\Khronos\Vulkan\Drivers`（免管理员）
+     —— Vulkan loader 的 Windows ICD 发现机制两种都枚举），或临时设置
+     环境变量 `VK_DRIVER_FILES=<json 路径>`（loader ≥ 1.3.207；旧名
+     `VK_ICD_FILENAMES`）直接测试；
    - 验证：`tests/vk_smoke/vk_smoke.exe`（端到端 compute，PASS = 全链路
      打通）→ `vkcube`（M1 验收门）。
    - 调研与依赖边界结论见 [../docs/research/terakan.md](../docs/research/terakan.md)

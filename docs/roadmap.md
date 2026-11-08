@@ -3,7 +3,8 @@
 > 状态标记：⬜ 未开始 ｜ 🚧 进行中 ｜ ✅ 完成
 > 当前状态：**M0 完成、M2 编译通过（2026-11）**——CI 已在 windows-2022 上
 > 自动产出 rokmd.sys（WDK NuGet + VS2022），待实机加载验证；
-> 2026-11 增补 M5.5（Vulkan 1.3）与 M7（R600g GL 4.6），原 M5 保留并加注。
+> 2026-11 增补 M5.5（Vulkan 1.3）与 M7（R600g GL 4.6），原 M5 保留并加注；
+> 2026-11 M2.8：WDDM 2.0 (0x5023) DDI 表全量补齐（机械验证无 NULL 成员）。
 
 每个阶段都有明确的"验收门"（DoD），未过验收不进入下一阶段。
 
@@ -61,6 +62,17 @@
 - ✅ M2.7b：**CCC 设置兼容**（kmd/src/ccc.c + umd/adl/rok_adl.dll）——
   Catalyst 遗留值名 + rokmd 专有名导入、escape CCC get/set、ADL2 同名
   枚举面；详见 docs/ccc.md
+- ✅ M2.8：**WDDM 2.0 (0x5023) DDI 表全量补齐**——对照 WDK 26100
+  dispmprt.h 的 DRIVER_INITIALIZATION_DATA 逐成员核对，补齐最后 5 个
+  函数成员（DxgkDdiLinkDevice / SetPowerComponentFState /
+  PowerRuntimeControlRequest / SetPowerPState /
+  SetVidPnSourceAddressWithMultiPlaneOverlay v1）；QueryAdapterInfo 扩面
+  （NUMPOWERCOMPONENTS / SEGMENTMEMORYSTATE /
+  DISPLAY_DRIVERCAPS_EXTENSION）；escape v1 追加
+  QUERY_ENGINE_STATUS（type 9，submitted/completed fence + in-flight +
+  提交/分页计数，M4 ICD 的 fence 进度通道）；QueryEngineStatus 改为
+  fence 进度判定；gpu_probe [4.8] 同步。94/94 函数成员非 NULL（脚本
+  scripts/check_ddi_table.py 机械验证）
 - ⬜ 修复首轮 CI / 实机 / VM 加载暴露的签名与 INF 问题
 - ⬜ 双机调试环境文档化（WinDbg + 1394/网络，或 Hyper-V Gen1 + 调试内核）
 

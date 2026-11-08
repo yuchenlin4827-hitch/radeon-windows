@@ -48,7 +48,7 @@ INF 覆盖 **AMD TeraScale 全家族 306 个设备 ID**（提取自 Linux 内核
 | Vulkan 1.3 | ⚠️ M5.5 目标（24 项核心特性差距） | 逐项计划见 docs/vulkan13-plan.md |
 | OpenGL 4.6 | ✅ **R600g 原生移植**（Mesa 25.2 起 r600/evergreen+ 完成） | 主路线；Zink（需 Vulkan 1.3）为备选 |
 | DX12 | ❌ 官方当年也只到 DX11 | 开源路径需 Vulkan 1.3 基座（vkd3d-proton 式转换层） |
-| WDDM 2.0 KMD | 🚧 骨架已就位 ← **本项目核心攻坚点** | DDI 表完整（M2.6）；硬件能力 M3 移植 |
+| WDDM 2.0 KMD | 🚧 骨架已就位 ← **本项目核心攻坚点** | DDI 表完整（M2.8：0x5023 全量无 NULL）；硬件能力 M3 移植 |
 
 结论：**Vulkan 1.0 已打通、GL 4.6 主路线已锁定（R600g）**；WDDM 2.0 KMD 是
 最大的缺口；Vulkan 1.3 与 DX12 按 M5.5/M6 推进。
@@ -141,7 +141,7 @@ vk_audit.exe --strict   :: 有缺口时返回非零退出码（CI 友好）
 | --- | --- | --- |
 | M0 | 仓库 / CI / 探测工具 / 文档 | ✅（CI 绿灯，rokmd.sys 产出） |
 | M1 | terakan Windows 构建管线（CI 编 ICD） | 🚧 |
-| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架编译通过（CI 产出 .sys），待实机加载验证 |
+| M2 | KMD 骨架可加载（AddDevice/StartDevice/资源映射） | 🚧 骨架编译通过（CI 产出 .sys）；M2.8：0x5023 DDI 表全量补齐，待实机加载验证 |
 | M3 | KMD 基础能力：VRAM 管理 / 驻留 / PM4 ring 提交 | ⬜（Seymour/Caicos 优先） |
 | M4 | terakan 摆脱官方 KMD 依赖 → 接自研 KMD | ⬜ |
 | M5 | OpenGL 可行性评估（存档，结论并入 M7） | ⬜ |

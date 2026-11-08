@@ -514,3 +514,57 @@ RokDdiSetVideoProtectedRegion(
     IN_CONST_HANDLE hAdapter,
     IN_CONST_PDXGKARG_SETVIDEOPROTECTEDREGION pArgs
     );
+
+// ---- M2.8 追加：0x5023 版本范围内最后一批 NULL 成员补齐
+// （签名逐字对照 WDK 26100 dispmprt.h / d3dkmddi.h）----
+
+// DxgkDdiLinkDevice（DRIVER_INITIALIZATION_DATA 基础成员，LDA 链接协商）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiLinkDevice(
+    IN_CONST_PDEVICE_OBJECT PhysicalDeviceObject,
+    IN_CONST_PVOID          MiniportDeviceContext,
+    INOUT_PLINKED_DEVICE    LinkedDevice
+    );
+
+// DxgkDdiSetPowerComponentFState（WIN8 成员；未注册电源组件时不可达）。
+// _IRQL_requires_max_(DISPATCH_LEVEL)：禁止 PAGED_CODE。
+NTSTATUS
+RokDdiSetPowerComponentFState(
+    IN_CONST_HANDLE DriverContext,
+    UINT            ComponentIndex,
+    UINT            FState
+    );
+
+// DxgkDdiPowerRuntimeControlRequest（WIN8 成员；SupportRuntimePowerManagement=0
+// 时不可达）。_IRQL_requires_max_(DISPATCH_LEVEL)：禁止 PAGED_CODE。
+// 参数拼写逐字对齐 WDK 26100 d3dkmddi.h 的 DXGKDDIPOWERRUNTIMECONTROLREQUEST。
+NTSTATUS
+RokDdiPowerRuntimeControlRequest(
+    IN_CONST_HANDLE DriverContext,
+    IN LPCGUID      PowerControlCode,
+    IN OPTIONAL PVOID InBuffer,
+    IN SIZE_T       InBufferSize,
+    OUT OPTIONAL PVOID OutBuffer,
+    IN SIZE_T       OutBufferSize,
+    OUT OPTIONAL PSIZE_T BytesReturned
+    );
+
+// DxgkDdiSetPowerPState（WDDM 1.3 成员；无 P-state 控制能力）。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiSetPowerPState(
+    IN_CONST_HANDLE DriverContext,
+    UINT            ComponentIndex,
+    UINT            RequestedComponentPState
+    );
+
+// DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay（WIN8 成员，MPO v1 翻转；
+// 0 路 source 不可达，与 MPO2 同样保签名）。
+// _IRQL_requires_max_(PROFILE_LEVEL - 1)：禁止 PAGED_CODE。
+NTSTATUS
+RokDdiSetVidPnSourceAddressWithMultiPlaneOverlay(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY
+    pSetVidPnSourceAddressWithMultiPlaneOverlay
+    );

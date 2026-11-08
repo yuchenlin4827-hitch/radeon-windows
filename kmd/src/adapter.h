@@ -40,7 +40,13 @@ typedef struct _ROK_ADAPTER {
     PVOID           MmioVirtualAddress;     // StopDevice 时 DxgkCbUnmapMemory
 
     // ---- 命令进度 ----
+    // "即时完成"模型：提交即完成，OS 经 DxgkDdiQueryCurrentFence 轮询
+    // LastCompletedFenceId 回收 DMA buffer；M3 换 IH ring 真实 fence 后，
+    // LastSubmitted 与 LastCompleted 分离，二者差值即 in-flight 深度。
     volatile LONG   LastCompletedFenceId;
+    volatile LONG   LastSubmittedFenceId;   // M2.8：escape 引擎状态查询用
+    volatile LONG   SubmitCount;            // M2.8：提交次数累计（观测）
+    volatile LONG   PagingOpsCount;         // M2.8：BuildPagingBuffer 次数（观测）
 
     // ---- 模拟设备（sim.c，M2.6）----
     BOOLEAN         SimulationMode;         // 自动/注册表/设备 ID 三路判定

@@ -528,6 +528,7 @@ typedef union _ROK_ESC_OUT_BUF {
     ROK_ESC_SEGMENT_INFO_OUT  seg;
     ROK_ESC_SIM_STATUS_OUT    sim;
     ROK_ESC_CCC_SETTINGS      ccc;
+    ROK_ESC_ENGINE_STATUS_OUT engine;
     unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 296];  // 最大 = SIM_STATUS(296)
 } ROK_ESC_OUT_BUF;
 
@@ -697,12 +698,13 @@ static void RokProbeRokmdEscapeChannel(void)
                    &out, sizeof(out.caps), &st);
         if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
         {
-            printf("  QUERY_CAPS   : OK  caps=0x%08X pm4=%u%s%s%s%s\n",
+            printf("  QUERY_CAPS   : OK  caps=0x%08X pm4=%u%s%s%s%s%s\n",
                    (unsigned)out.caps.CapsMask, (unsigned)out.caps.Pm4PacketVersion,
                    (out.caps.CapsMask & ROK_CAP_MMIO_MAPPED)   ? " [MMIO]" : "",
                    (out.caps.CapsMask & ROK_CAP_PCI_ID_VALID)  ? " [PCI]" : "",
                    (out.caps.CapsMask & ROK_CAP_SEGMENT_QUERY) ? " [SEGQ]" : "",
-                   (out.caps.CapsMask & ROK_CAP_VRAM_SEGMENT)  ? " [VRAM-SEG]" : "");
+                   (out.caps.CapsMask & ROK_CAP_VRAM_SEGMENT)  ? " [VRAM-SEG]" : "",
+                   (out.caps.CapsMask & ROK_CAP_ENGINE_STATUS_QUERY) ? " [ENGQ]" : "");
         }
 
         // [4.5] QUERY_SEGMENT_INFO（v1.1 追加；M3 前全 0）
@@ -757,6 +759,22 @@ static void RokProbeRokmdEscapeChannel(void)
                    (unsigned)out.ccc.OverdriveEnable,
                    (unsigned)out.ccc.FanSpeedPercent,
                    (unsigned)out.ccc.Source);
+        }
+
+        // [4.8] QUERY_ENGINE_STATUS（M2.8：提交管线活性/fence 进度，
+        //       M4 terakan ICD 用同一通道轮询 fence）
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_ENGINE_STATUS,
+                   &out, sizeof(out.engine), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            printf("  QUERY_ENGINE: OK  submitted=%u completed=%u inflight=%u "
+                   "submits=%u paging=%u responsive=%u\n",
+                   (unsigned)out.engine.LastSubmittedFenceId,
+                   (unsigned)out.engine.LastCompletedFenceId,
+                   (unsigned)out.engine.InFlightFences,
+                   (unsigned)out.engine.SubmitCount,
+                   (unsigned)out.engine.PagingOpsCount,
+                   (unsigned)out.engine.Responsive);
         }
 
         if (hDevice != 0 && pDestroyDevice != NULL)

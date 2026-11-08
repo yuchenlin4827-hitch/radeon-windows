@@ -40,7 +40,8 @@ typedef uint64_t ROK_U64;
 // 协议版本：v1 = 查询面。M3/M4 追加提交类接口时升 v2 并保留 v1 查询。
 #define ROK_ESCAPE_VERSION      1UL
 
-// Escape 类型（v1 查询面；M2.6 追加 SIM/CCC 为 6/7/8，向后兼容）。
+// Escape 类型（v1 查询面；M2.6 追加 SIM/CCC 为 6/7/8，M2.8 追加引擎状态为 9，
+// 均向后兼容：旧调用方不感知新增类型）。
 typedef enum _ROK_ESCAPE_TYPE
 {
     ROK_ESC_TYPE_QUERY_VERSION   = 1,    // -> ROK_ESC_VERSION_OUT
@@ -51,6 +52,7 @@ typedef enum _ROK_ESCAPE_TYPE
     ROK_ESC_TYPE_QUERY_SIM_STATUS = 6,   // -> ROK_ESC_SIM_STATUS_OUT（M2.6，sim.c）
     ROK_ESC_TYPE_CCC_GET_SETTINGS = 7,   // -> ROK_ESC_CCC_SETTINGS（M2.6，ccc.c）
     ROK_ESC_TYPE_CCC_SET_SETTINGS = 8,   // <- ROK_ESC_CCC_SETTINGS（M2.6，输入报文）
+    ROK_ESC_TYPE_QUERY_ENGINE_STATUS = 9, // -> ROK_ESC_ENGINE_STATUS_OUT（M2.8）
 } ROK_ESCAPE_TYPE;
 
 // 能力位（ROK_ESC_CAPS_OUT.CapsMask）。
@@ -61,6 +63,7 @@ typedef enum _ROK_ESCAPE_TYPE
 #define ROK_CAP_IH_INTERRUPT        0x00000200UL  // M3：IH 中断可用
 #define ROK_CAP_VRAM_SEGMENT        0x00000400UL  // M3：VRAM 段可用
 #define ROK_CAP_SEGMENT_QUERY       0x00000800UL  // QUERY_SEGMENT_INFO 可用（v1.1）
+#define ROK_CAP_ENGINE_STATUS_QUERY 0x00001000UL  // M2.8：QUERY_ENGINE_STATUS 可用
 
 // 段标志（ROK_ESC_SEGMENT_INFO_OUT.Flags）。
 #define ROK_SEG_FLAG_VRAM_POPULATED 0x00000001UL  // VramSizeBytes 已探测
@@ -162,6 +165,21 @@ typedef struct _ROK_ESC_CCC_SETTINGS
     ROK_U32 Reserved;           // 0
 } ROK_ESC_CCC_SETTINGS, *PROK_ESC_CCC_SETTINGS;
 
+// ---- 引擎状态（M2.8；escape 查询 9）----
+// 用途：探测/工具核对提交管线活性；M4 的 terakan ICD 以同一通道
+// 轮询 fence 进度（即时完成模型 submitted==completed，M3 接 IH 后分离）。
+// 结构必须 POD 且稳定：字段增删只能追加，两侧 C_ASSERT 防漂移。
+typedef struct _ROK_ESC_ENGINE_STATUS_OUT
+{
+    ROK_U32 LastSubmittedFenceId;   // 最近提交的 fence id（SubmitCommand/Virtual）
+    ROK_U32 LastCompletedFenceId;   // 最近完成的 fence id
+    ROK_U32 InFlightFences;         // submitted - completed（负值钳为 0）
+    ROK_U32 SubmitCount;            // 提交次数累计（回绕观测值）
+    ROK_U32 PagingOpsCount;         // BuildPagingBuffer 调用累计
+    ROK_U32 Responsive;             // 1 = 引擎在推进（fence 进度判定）
+    ROK_U32 Reserved[2];            // 0
+} ROK_ESC_ENGINE_STATUS_OUT, *PROK_ESC_ENGINE_STATUS_OUT;
+
 #if defined(_WIN32)
 C_ASSERT(sizeof(ROK_ESCAPE_HEADER) == 16);
 C_ASSERT(sizeof(ROK_ESC_VERSION_OUT) == 16);
@@ -171,6 +189,7 @@ C_ASSERT(sizeof(ROK_ESC_CAPS_OUT) == 16);
 C_ASSERT(sizeof(ROK_ESC_SEGMENT_INFO_OUT) == 32);
 C_ASSERT(sizeof(ROK_ESC_SIM_STATUS_OUT) == 296);
 C_ASSERT(sizeof(ROK_ESC_CCC_SETTINGS) == 32);
+C_ASSERT(sizeof(ROK_ESC_ENGINE_STATUS_OUT) == 32);
 #endif
 
 // TeraScale 家族启发式（M3 用完整分发表替换）。

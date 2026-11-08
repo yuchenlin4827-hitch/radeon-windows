@@ -362,6 +362,65 @@ RokDdiQueryAdapterInfo(
         return STATUS_SUCCESS;
     }
 
+    case DXGKQAITYPE_NUMPOWERCOMPONENTS:
+    {
+        // WIN8 起 OS 启动时探测电源组件数量。0 = 无组件（配套：
+        // DRIVERCAPS.SupportRuntimePowerManagement=0、SetPowerComponentFState
+        // 按组件不存在语义答复）。返回成功值 0 让 OS 走"无电源组件"路径，
+        // 避免 NOT_IMPLEMENTED 触发默认假设或反复重试。
+        if (pQueryAdapterInfo->OutputDataSize < sizeof(UINT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        *(UINT *)pQueryAdapterInfo->pOutputData = 0;
+
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: QueryAdapterInfo NUMPOWERCOMPONENTS (0)\n"));
+        return STATUS_SUCCESS;
+    }
+
+    case DXGKQAITYPE_SEGMENTMEMORYSTATE:
+    {
+        // WDDM 2.0 起 OS 按段查询"无效内存范围"（VidMm 回避表）。
+        // 0 段模式（QUERYSEGMENT3/4 报 NbSegment=0）下没有可查询的段，
+        // 因此无条件回答"0 条范围"——这是当前形态下的确定性正确答案；
+        // 不对 pInputData 做强校验，避免任何启动期硬拒绝路径。
+        DXGK_QUERYSEGMENTMEMORYSTATE *memState;
+
+        if (pQueryAdapterInfo->pOutputData == NULL ||
+            pQueryAdapterInfo->OutputDataSize < sizeof(DXGK_QUERYSEGMENTMEMORYSTATE))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        memState = (DXGK_QUERYSEGMENTMEMORYSTATE *)pQueryAdapterInfo->pOutputData;
+        memState->NumInvalidMemoryRanges = 0;
+        memState->pMemoryRanges = NULL;
+
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: QueryAdapterInfo SEGMENTMEMORYSTATE (0 ranges, no segments)\n"));
+        return STATUS_SUCCESS;
+    }
+
+    case DXGKQAITYPE_DISPLAY_DRIVERCAPS_EXTENSION:
+    {
+        // WDDM 2.0 扩展能力位（SecureDisplay/VirtualMode/NonSpecificPrimary）。
+        // 全零 = 均不支持：与 render-only 骨架的显示能力一致，OS 据此
+        // 关闭对应路径。WDDM 2.1+ 的 HDR/VRR 等高位在本版本编译下不存在。
+        DXGK_DISPLAY_DRIVERCAPS_EXTENSION *extCaps;
+
+        if (pQueryAdapterInfo->OutputDataSize < sizeof(DXGK_DISPLAY_DRIVERCAPS_EXTENSION))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        extCaps = (DXGK_DISPLAY_DRIVERCAPS_EXTENSION *)pQueryAdapterInfo->pOutputData;
+        RtlZeroMemory(extCaps, sizeof(DXGK_DISPLAY_DRIVERCAPS_EXTENSION));
+
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: QueryAdapterInfo DISPLAY_DRIVERCAPS_EXTENSION (none)\n"));
+        return STATUS_SUCCESS;
+    }
+
     default:
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
                    "rokmd: QueryAdapterInfo type=%u (not implemented)\n", pQueryAdapterInfo->Type));
@@ -735,8 +794,11 @@ RokDdiSubmitCommand(
     // OS 经 DxgkDdiQueryCurrentFence 轮询该值回收 DMA buffer。
     // M3：把 DMA buffer 以 PM4 INDIRECT_BUFFER 写入 CP ring（对照
     // Linux radeon 的 radeon_ring_commit / r600_ib_*），fence 由 IH 上报。
+    InterlockedExchange(&adapter->LastSubmittedFenceId,
+                        (LONG)pSubmitCommand->SubmissionFenceId);
     InterlockedExchange(&adapter->LastCompletedFenceId,
                         (LONG)pSubmitCommand->SubmissionFenceId);
+    InterlockedIncrement(&adapter->SubmitCount);
 
     // 模拟设备（sim.c）：记录观察到的最近 fence（真实模式为簿记空操作）。
     adapter->SimStats.LastFenceSubmitted = (UINT32)pSubmitCommand->SubmissionFenceId;
@@ -766,8 +828,11 @@ RokDdiSubmitCommandVirtual(
 
     // WDDM 2.0 虚拟地址提交路径（UMD/ICD 直填 GPU VA 的 DMA buffer）。
     // M4 的 terakan ICD 命令流将走本通道；当前同样即时完成。
+    InterlockedExchange(&adapter->LastSubmittedFenceId,
+                        (LONG)pSubmitCommand->SubmissionFenceId);
     InterlockedExchange(&adapter->LastCompletedFenceId,
                         (LONG)pSubmitCommand->SubmissionFenceId);
+    InterlockedIncrement(&adapter->SubmitCount);
 
     // 模拟设备（sim.c）：PM4 解码统计（真实模式为空操作）。
     adapter->SimStats.LastFenceSubmitted = (UINT32)pSubmitCommand->SubmissionFenceId;
@@ -853,11 +918,17 @@ RokDdiBuildPagingBuffer(
     )
 {
     PAGED_CODE();
-    UNREFERENCED_PARAMETER(hAdapter);
 
     if (pBuildPagingBuffer == NULL || pBuildPagingBuffer->pDmaBuffer == NULL)
     {
         return STATUS_SUCCESS;   // 无 buffer 可填（0 段模式下不应发生）
+    }
+
+    // 分页操作计数（M2.8：escape 引擎状态查询回传，M4 ICD 可用于
+    // 判断 VidMm 驻留活动强度）。
+    if (hAdapter != NULL)
+    {
+        InterlockedIncrement(&((PROK_ADAPTER)hAdapter)->PagingOpsCount);
     }
 
     // 填充 PM4 type-3 NOP（0xC0001000）：真实驱动在此生成
@@ -1052,7 +1123,8 @@ RokDdiEscape(
             return STATUS_BUFFER_TOO_SMALL;
         }
         out = (PROK_ESC_CAPS_OUT)(header + 1);
-        out->CapsMask = ROK_CAP_PCI_ID_VALID | ROK_CAP_SEGMENT_QUERY;
+        out->CapsMask = ROK_CAP_PCI_ID_VALID | ROK_CAP_SEGMENT_QUERY |
+                        ROK_CAP_ENGINE_STATUS_QUERY;   // M2.8：引擎状态查询可用
         if (adapter->MmioVirtualAddress != NULL)
         {
             out->CapsMask |= ROK_CAP_MMIO_MAPPED;
@@ -1164,6 +1236,39 @@ RokDdiEscape(
         inKernel.Source = in->Source;
         inKernel.Reserved = in->Reserved;
         return RokCccSetSettings(adapter, &inKernel);
+    }
+
+    case ROK_ESC_TYPE_QUERY_ENGINE_STATUS:    // M2.8：提交管线活性/fence 进度
+    {
+        PROK_ESC_ENGINE_STATUS_OUT out;
+        LONG submitted, completed, inFlight;
+
+        if (pEscape->PrivateDriverDataSize <
+            sizeof(ROK_ESCAPE_HEADER) + sizeof(ROK_ESC_ENGINE_STATUS_OUT))
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        out = (PROK_ESC_ENGINE_STATUS_OUT)(header + 1);
+
+        submitted = InterlockedCompareExchange(&adapter->LastSubmittedFenceId, 0, 0);
+        completed = InterlockedCompareExchange(&adapter->LastCompletedFenceId, 0, 0);
+        inFlight = submitted - completed;
+        if (inFlight < 0)
+        {
+            inFlight = 0;   // 回绕/异常时钳 0，不外泄负值
+        }
+
+        out->LastSubmittedFenceId = (ROK_U32)submitted;
+        out->LastCompletedFenceId = (ROK_U32)completed;
+        out->InFlightFences = (ROK_U32)inFlight;
+        out->SubmitCount = (ROK_U32)InterlockedCompareExchange(&adapter->SubmitCount, 0, 0);
+        out->PagingOpsCount = (ROK_U32)InterlockedCompareExchange(&adapter->PagingOpsCount, 0, 0);
+        // 即时完成模型恒为 1；M3 接真实 ring 后：completed 长时间不追上
+        // submitted 且无 IH 进度事件才置 0（对照 dxgkrnl QueryEngineStatus 语义）。
+        out->Responsive = 1;
+        out->Reserved[0] = 0;
+        out->Reserved[1] = 0;
+        return STATUS_SUCCESS;
     }
 
     default:
@@ -1371,11 +1476,33 @@ RokDdiQueryEngineStatus(
     INOUT_PDXGKARG_QUERYENGINESTATUS pQueryEngineStatus
     )
 {
-    PAGED_CODE();
-    UNREFERENCED_PARAMETER(hAdapter);
+    PROK_ADAPTER adapter = (PROK_ADAPTER)hAdapter;
+    LONG submitted, completed;
 
-    // 即时完成模型下引擎永远"有进度"；M3 换真实 GRBM 状态探测。
+    PAGED_CODE();
+
+    if (adapter == NULL || pQueryEngineStatus == NULL)
+    {
+        return STATUS_INVALID_HANDLE;
+    }
+
+    // 用 fence 进度回答"引擎是否在推进"：submitted >= completed 说明还有
+    // 未完成提交；即时完成模型二者恒相等（Responsive=1）。M3 换真实
+    // ring/IH 后本逻辑直接复用：completed 长时间不追上 submitted 才报 0。
+    // （读数仅供日志观测；UNREFERENCED_PARAMETER 保证 release 构建
+    // KdPrintEx 被编译掉时无未引用警告。）
+    submitted = InterlockedCompareExchange(&adapter->LastSubmittedFenceId, 0, 0);
+    completed = InterlockedCompareExchange(&adapter->LastCompletedFenceId, 0, 0);
+    UNREFERENCED_PARAMETER(submitted);
+    UNREFERENCED_PARAMETER(completed);
+
     pQueryEngineStatus->EngineStatus.Responsive = 1;
+
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL,
+               "rokmd: QueryEngineStatus node=%u engine=%u submitted=%ld completed=%ld (inflight=%ld)\n",
+               pQueryEngineStatus->NodeOrdinal,
+               pQueryEngineStatus->EngineOrdinal,
+               submitted, completed, submitted - completed));
     return STATUS_SUCCESS;
 }
 
@@ -1945,5 +2072,125 @@ RokDdiSetVideoProtectedRegion(
     PAGED_CODE();
     UNREFERENCED_PARAMETER(hAdapter);
     UNREFERENCED_PARAMETER(pArgs);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+// ------------------------------------------------------------------
+// WDDM 2.0 DDI 表补全收尾（M2.8）
+// ------------------------------------------------------------------
+// 目标：DXGKDDI_INTERFACE_VERSION = 0x5023（WDDM 2.0）下
+// DRIVER_INITIALIZATION_DATA 不再有任何 NULL 函数成员 —— 对照
+// WDK 26100 dispmprt.h 的成员清单逐项核对（M2.6 首轮补全的收尾）：
+//   * DxgkDdiLinkDevice（基础成员，LDA 链接协商）；
+//   * DxgkDdiSetPowerComponentFState / DxgkDdiPowerRuntimeControlRequest
+//     （WIN8 成员，电源组件/PEP 通道）；
+//   * DxgkDdiSetPowerPState（WDDM 1.3 成员）；
+//   * DxgkDdiSetVidPnSourceAddressWithMultiPlaneOverlay（WIN8 成员，
+//     MPO v1 翻转路径）。
+// 本驱动未注册任何电源组件（NUMPOWERCOMPONENTS=0）、未声明
+// SupportRuntimePowerManagement、报告 0 路 VidPn source，以上路径
+// 在当前形态下不可达；实现按"能力不存在"给出确定性答复并留观测点，
+// 避免 dxgkrnl 按版本校验成员时因 NULL 拒绝加载。
+// ------------------------------------------------------------------
+
+// LDA（多适配器链接）协商：单适配器 render-only 驱动明确不支持
+//（与 WDK KMDOD 样例同款答复）。OS 收到错误码后按独立适配器继续。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiLinkDevice(
+    IN_CONST_PDEVICE_OBJECT PhysicalDeviceObject,
+    IN_CONST_PVOID          MiniportDeviceContext,
+    INOUT_PLINKED_DEVICE    LinkedDevice
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(PhysicalDeviceObject);
+    UNREFERENCED_PARAMETER(MiniportDeviceContext);
+    UNREFERENCED_PARAMETER(LinkedDevice);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+               "rokmd: LinkDevice (not supported — single adapter)\n"));
+    return STATUS_NOT_SUPPORTED;
+}
+
+// 电源组件 F 状态切换。本驱动不向 OS 报告任何电源组件
+//（QueryAdapterInfo NUMPOWERCOMPONENTS=0），正常流程不会进入；
+// 返回 STATUS_INVALID_PARAMETER 以外的成功码反而会在组件表为空时
+// 掩盖 OS 侧异常，故按"组件不存在"语义答复。
+// _IRQL_requires_max_(DISPATCH_LEVEL)：禁止 PAGED_CODE / 池分配。
+NTSTATUS
+RokDdiSetPowerComponentFState(
+    IN_CONST_HANDLE DriverContext,
+    UINT            ComponentIndex,
+    UINT            FState
+    )
+{
+    UNREFERENCED_PARAMETER(DriverContext);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+               "rokmd: SetPowerComponentFState component=%u F=%u (no components)\n",
+               ComponentIndex, FState));
+    return STATUS_INVALID_PARAMETER;
+}
+
+// PEP（电源引擎插件）控制请求通道。SupportRuntimePowerManagement=0
+// 时 OS 不应调用；保持与能力声明一致的"不支持"答复。
+// _IRQL_requires_max_(DISPATCH_LEVEL)：禁止 PAGED_CODE / 池分配。
+NTSTATUS
+RokDdiPowerRuntimeControlRequest(
+    IN_CONST_HANDLE DriverContext,
+    IN LPCGUID      PowerControlCode,
+    IN OPTIONAL PVOID InBuffer,
+    IN SIZE_T       InBufferSize,
+    OUT OPTIONAL PVOID OutBuffer,
+    IN SIZE_T       OutBufferSize,
+    OUT OPTIONAL PSIZE_T BytesReturned
+    )
+{
+    UNREFERENCED_PARAMETER(DriverContext);
+    UNREFERENCED_PARAMETER(PowerControlCode);
+    UNREFERENCED_PARAMETER(InBuffer);
+    UNREFERENCED_PARAMETER(InBufferSize);
+    UNREFERENCED_PARAMETER(OutBuffer);
+    UNREFERENCED_PARAMETER(OutBufferSize);
+    if (BytesReturned != NULL)
+    {
+        *BytesReturned = 0;
+    }
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+               "rokmd: PowerRuntimeControlRequest (runtime power not supported)\n"));
+    return STATUS_NOT_SUPPORTED;
+}
+
+// P-state 切换（WDDM 1.3 面电源管理增强）。无时钟控制硬件路径（M3+
+// 才接入 GRBM/SMU 域），按能力声明答复不支持。
+// PASSIVE_LEVEL。
+NTSTATUS
+RokDdiSetPowerPState(
+    IN_CONST_HANDLE DriverContext,
+    UINT            ComponentIndex,
+    UINT            RequestedComponentPState
+    )
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(DriverContext);
+    UNREFERENCED_PARAMETER(ComponentIndex);
+    UNREFERENCED_PARAMETER(RequestedComponentPState);
+    KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+               "rokmd: SetPowerPState component=%u pstate=%u (not supported)\n",
+               ComponentIndex, RequestedComponentPState));
+    return STATUS_NOT_SUPPORTED;
+}
+
+// MPO v1 翻转地址提交（WIN8 面）。0 路 VidPn source 下不可达，
+// 与 MPO2（WDDM 2.0 面）保持一致的确定性拒绝。
+// _IRQL_requires_max_(PROFILE_LEVEL - 1)：禁止 PAGED_CODE。
+NTSTATUS
+RokDdiSetVidPnSourceAddressWithMultiPlaneOverlay(
+    IN_CONST_HANDLE hAdapter,
+    IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESSWITHMULTIPLANEOVERLAY
+    pSetVidPnSourceAddressWithMultiPlaneOverlay
+    )
+{
+    UNREFERENCED_PARAMETER(hAdapter);
+    UNREFERENCED_PARAMETER(pSetVidPnSourceAddressWithMultiPlaneOverlay);
     return STATUS_NOT_IMPLEMENTED;
 }
