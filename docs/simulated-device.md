@@ -6,17 +6,21 @@
 > 这是 M2/M3 之间最重要的回归手段：每一笔 KMD 改动先在 VM 里过一遍，
 > 再考虑上真实卡。
 
-## 0. 测试金字塔（无硬件环境的三层验证）
+## 0. 测试金字塔（无硬件环境的四层验证）
 
 | 层 | 环境 | 验证内容 | 入口 |
 | --- | --- | --- | --- |
 | L1 逻辑单元测试 | 任意 Linux（CI ubuntu）/ 本机 | ccc.c/sim.c 纯逻辑：PM4 解码、CCC 导入钳制、sim 三路判定 | `bash tests/host_tests/build-and-run.sh`（ASan/UBSan） |
+| L1.5 模拟设备 E2E | 任意 Linux / 本机 | **kmd 全部五个 C 文件**（driver/adapter/ddi/sim/ccc）在虚拟 dxgkrnl 上跑完整 WDDM 2.0 管线：DriverEntry→AddDevice→StartDevice→分配→上下文→PM4 提交→fence 回收→escape（含负例）→CCC get/set 钳制→拆除；另含真实形态负路径（sim 关、BAR0 真映射、遗留名导入） | `bash tests/host_tests/build-and-run-e2e.sh`（ASan/UBSan） |
 | L2 用户态冒烟 | Wine / Windows | gpu_probe（D3DKMT/CPUID/注册表/ICD 清单/escape 面）、vk_smoke（loader 链路）、adl_smoke（rok_adl.dll 加载与枚举） | `wine64 gpu_probe.exe` 等（见 §6） |
 | L3 内核管线 | Windows VM（QEMU ati-vga 等） | KMD 真装：AddDevice→StartDevice→分配→提交→fence→escape 全链 | §2 起的 VM runbook |
 
 L1 用 mock 内核原语（注册表内存表/池/cpuid 钩子）编译 kmd/src 的**真实
 源码字节**（sha256 前后校验，防测试漂移），是 KMD 逻辑改动的第一道回归；
-L2/L3 分别在 Wine 与 Windows VM 里做集成验证。三层都不需要真实 TeraScale 卡。
+L1.5 补上 L1 不覆盖的 DDI 管线与生命周期平衡（kmock2 mock WDK 面 +
+vdxgkrnl 虚拟 OS：PCI 配置空间/回调表/资源清单/驱动键，DDI 表 89 成员
+经 DxgkInitialize 捕获后全部走表调用）；L2/L3 分别在 Wine 与 Windows VM
+里做集成验证。四层都不需要真实 TeraScale 卡。
 
 ## 1. KMD 侧机制（kmd/src/sim.c）
 
@@ -188,4 +192,32 @@ Wine 层的**预期失败**（无宿主 GPU/ICD）恰好验证了测试程序的
 覆盖：PM4 type-0/2/3 解码、INDIRECT_BUFFER 字段捕获、跨界残包安全终止、
 非 sim 短路；CCC 遗留名兜底/专有名优先/范围钳制/空键默认/NULL 防御；
 escape set 版本校验/钳化/roundtrip/Overdrive 归一化；sim 三路判定全分支。
+
+## 8. L1.5 参考输出（模拟设备 E2E，2026-11）
+
+```text
+ DDI members registered: 89 / 89        ← DriverEntry 注册面全量非空
+==== PASS A — simulated device: QEMU ati-vga (1002:5046) ====
+rokmd: SIM MODE — VID=0x1002 DID=0x5046 hv=1 (reg=0 id=1)
+rokmd: ccc — imported (mask=0xf engine=900000KHz mem=1150000KHz od=1 fan=60)
+rokmd: sim PM4 INDIRECT_BUFFER (op 0x32, 4 dwords)
+rokmd: sim PM4 EVENT_WRITE_EOP (op 0x47, 4 dwords)
+rokmd: sim decode — 3 pkts total, 1 INDIRECT_BUFFER (base 0x10000000, 512 dwords)
+rokmd: SubmitCommandVirtual fence=77 → 78 → 79（QueryCurrentFence 全部回收）
+rokmd: ccc — set (mask=0xf engine=2000000KHz … fan=100)   ← 3GHz/150% 被钳制
+==== PASS B — real form: Caicos (1002:6779), no hypervisor ====
+rokmd: sim — real/unknown hardware (…), simulation off    ← SIM 位不亮
+rokmd: BAR0 MMIO mapped PA=0xfde00000 len=0x10000          ← 真实映射路径
+==== sim-device E2E: 143 checks, 0 failed ====  （ASan/UBSan 全程无告警）
+```
+
+覆盖（143 项检查）：DDI 表完整性（89 成员）；sim 全管线（caps WDDMv2/
+MultiEngineAware、0 段、进程/设备/分配/上下文生命周期、BuildPagingBuffer
+PM4 NOP 填充、三次提交 + fence 轮询回收、PM4 直方图逐槽核对含 0x47→槽
+0x07 折叠语义）；escape 契约（VERSION/PCI_ID/CAPS/SIM_STATUS/CCC_GET/
+CCC_SET 正例 + 坏 magic/坏版本/缓冲不足/未知类型四负例）；CCC 钳制与
+来源切换（REGISTRY→ESCAPE）；引擎管理面（QueryDependentEngineGroup/
+EngineStatus/ResetEngine/GetNodeMetadata/MPO 拒绝）；真实形态负路径；
+两次 adapter 生命周期的池分配零泄漏（ASan + tag 记账双重核对）。
+
 
