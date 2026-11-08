@@ -15,6 +15,9 @@
 //     （vkCreateInstance 等）；实例级命令先 GetProcAddress 探测 trampoline
 //     导出，实例创建成功后再用 gipa(instance, ...) 正式解析（官方
 //     Vulkan-Loader trampoline.c：instance==NULL 时非全局命令一律返回 NULL）；
+//   - v1.2 新增：逐份解析注册表 ICD manifest JSON——提取 library_path、
+//     反转义、按 JSON 所在目录拼接完整路径并检查 DLL 存在性，
+//     区分「残留注册表项/ DLL 已丢失」与「DLL 在但硬件不支持」两种无 ICD 原因；
 //   - vkCreateInstance 失败时输出诊断：实际加载的 DLL 路径、
 //     VK_DRIVER_FILES/VK_ICD_FILENAMES、注册表 ICD 清单（64/32 位视图）；
 //   - 特性/子群组/格式/limits 逐项填入 umd/vk13 与 umd/gl46 的门控模块，
@@ -80,8 +83,126 @@ static const char *vk_result_str(VkResult vr)
     }
 }
 
+/* 解析一份 ICD manifest JSON：提取 library_path（最简解析：定位键名 ->
+ * 取带引号字符串 -> 反转义 \\ 与 \/），相对路径按 JSON 所在目录拼接，
+ * 然后检查 DLL 是否真的存在。usable 置 1 表示 manifest 可用。 */
+static void audit_icd_json(const char *json_path, int *usable)
+{
+    FILE *f;
+    char buf[8192];
+    size_t n;
+    const char *p;
+    char dll[1024];
+    size_t dl = 0;
+    DWORD attr;
+
+    *usable = 0;
+    attr = GetFileAttributesA(json_path);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        printf("        manifest file : MISSING\n");
+        return;
+    }
+
+    f = fopen(json_path, "rb");
+    if (f == NULL) {
+        printf("        manifest file : unreadable\n");
+        return;
+    }
+    n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    p = strstr(buf, "\"api_version\"");
+    if (p != NULL) {
+        p = strchr(p, ':');
+        if (p != NULL) {
+            p++;
+            while (*p == ' ' || *p == '\t') {
+                p++;
+            }
+            if (*p == '"') {
+                char ver[32];
+                size_t vl = 0;
+                p++;
+                while (*p && *p != '"' && vl + 1 < sizeof(ver)) {
+                    ver[vl++] = *p++;
+                }
+                ver[vl] = '\0';
+                printf("        api_version  : %s\n", ver);
+            } else if (*p >= '0' && *p <= '9') {
+                char ver[32];
+                size_t vl = 0;
+                while (*p >= '0' && *p <= '9' && vl + 1 < sizeof(ver)) {
+                    ver[vl++] = *p++;
+                }
+                ver[vl] = '\0';
+                printf("        api_version  : %s (packed uint32)\n", ver);
+            }
+        }
+    }
+
+    p = strstr(buf, "\"library_path\"");
+    if (p == NULL) {
+        printf("        manifest has no library_path key\n");
+        return;
+    }
+    p = strchr(p, ':');
+    if (p == NULL) {
+        printf("        library_path  : malformed\n");
+        return;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    if (*p != '"') {
+        printf("        library_path  : (non-string, unsupported)\n");
+        return;
+    }
+    p++;
+    while (*p && *p != '"' && dl + 1 < sizeof(dll)) {
+        if (*p == '\\' && (p[1] == '\\' || p[1] == '/')) {
+            p++;
+        }
+        dll[dl++] = *p++;
+    }
+    dll[dl] = '\0';
+
+    {
+        char full[1024];
+        const char *slash;
+        int abs = (strchr(dll, ':') != NULL) ||
+                  (dll[0] == '\\' && dll[1] == '\\');
+        if (abs) {
+            snprintf(full, sizeof(full), "%s", dll);
+        } else {
+            slash = strrchr(json_path, '\\');
+            if (slash == NULL) {
+                slash = strrchr(json_path, '/');
+            }
+            if (slash != NULL) {
+                snprintf(full, sizeof(full), "%.*s%s",
+                         (int)(slash - json_path + 1), json_path, dll);
+            } else {
+                snprintf(full, sizeof(full), "%s", dll);
+            }
+        }
+        attr = GetFileAttributesA(full);
+        if (attr != INVALID_FILE_ATTRIBUTES &&
+            !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            printf("        library_path  : %s -> %s  [DLL present]\n",
+                   dll, full);
+            *usable = 1;
+        } else {
+            printf("        library_path  : %s -> %s  [DLL MISSING]\n",
+                   dll, full);
+        }
+    }
+}
+
 /* 枚举 HKLM\SOFTWARE\Khronos\Vulkan\Drivers 的 64/32 位视图。
- * 每个值的名字就是一份 ICD manifest JSON 的完整路径。 */
+ * 每个值的名字就是一份 ICD manifest JSON 的完整路径；
+ * v1.2 起逐份解析并检查指向的 DLL 是否存在。 */
 static void print_icd_registry(void)
 {
     static const struct {
@@ -93,6 +214,7 @@ static void print_icd_registry(void)
     };
     size_t v;
     int total = 0;
+    int usable_total = 0;
     const char *env = getenv("VK_DRIVER_FILES");
 
     if (env == NULL) {
@@ -123,6 +245,11 @@ static void print_icd_registry(void)
                     break;
                 }
                 printf("    [%lu] %s\n", (unsigned long)idx, name);
+                {
+                    int usable = 0;
+                    audit_icd_json(name, &usable);
+                    usable_total += usable;
+                }
                 total++;
                 idx++;
             }
@@ -137,6 +264,18 @@ static void print_icd_registry(void)
         printf("     Expected on TeraScale (HD 2000-7000) with legacy Catalyst:\n"
                "     AMD never shipped a Vulkan ICD for these GPUs.\n");
         printf("     That is exactly what M1/M4 (terakan ICD) will provide.\n");
+    } else if (usable_total == 0) {
+        printf("  -> %d ICD manifest(s) registered, but 0 resolve to an "
+               "existing driver DLL.\n", total);
+        printf("     Stale registry entries, or the driver package no longer "
+               "ships its Vulkan ICD.\n");
+        printf("     NOTE: AMD Vulkan requires GCN or newer; TeraScale "
+               "(HD 2000-7000) was never supported by AMDVLK.\n");
+        printf("     This machine has no working Vulkan ICD - the gap "
+               "M1/M4 (terakan) will fill.\n");
+    } else {
+        printf("  -> %d of %d ICD manifest(s) resolve to an existing "
+               "driver DLL.\n", usable_total, total);
     }
 }
 
@@ -726,7 +865,7 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("vk_audit v1.1 - radeon-windows M5.5 (Vulkan 1.3) / M7 (OpenGL 4.6) audit\n");
+    printf("vk_audit v1.2 - radeon-windows M5.5 (Vulkan 1.3) / M7 (OpenGL 4.6) audit\n");
     printf("==========================================================================\n");
 
     if (!load_vulkan_loader()) {
