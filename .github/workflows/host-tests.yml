@@ -1,0 +1,27 @@
+# KMD 纯逻辑主机端单元测试（Linux，无需 WDK/Windows）
+# 被测对象 = kmd/src/{ccc.c, sim.c} 真实字节（脚本 sha256 前后校验），
+# 经 tests/host_tests/kmock 的内核原语 mock 在宿主编译运行：
+#   * PM4 解码器（type-0/2/3 + INDIRECT_BUFFER + 跨界残包内存安全，ASan 兜底）
+#   * CCC 设置导入/钳制/escape set/get 闭环
+#   * sim 模式三路判定（设备 ID / 注册表 / hypervisor 自动）
+# 每个 KMD 逻辑改动推送即回归 —— 不必等 Windows CI 的 WDK 构建。
+name: host-tests
+
+on:
+  push:
+    paths:
+      - 'kmd/**'
+      - 'tests/host_tests/**'
+      - '.github/workflows/host-tests.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run host unit tests (ASan/UBSan)
+        run: bash tests/host_tests/build-and-run.sh

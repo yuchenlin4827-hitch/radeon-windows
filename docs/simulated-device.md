@@ -6,6 +6,18 @@
 > 这是 M2/M3 之间最重要的回归手段：每一笔 KMD 改动先在 VM 里过一遍，
 > 再考虑上真实卡。
 
+## 0. 测试金字塔（无硬件环境的三层验证）
+
+| 层 | 环境 | 验证内容 | 入口 |
+| --- | --- | --- | --- |
+| L1 逻辑单元测试 | 任意 Linux（CI ubuntu）/ 本机 | ccc.c/sim.c 纯逻辑：PM4 解码、CCC 导入钳制、sim 三路判定 | `bash tests/host_tests/build-and-run.sh`（ASan/UBSan） |
+| L2 用户态冒烟 | Wine / Windows | gpu_probe（D3DKMT/CPUID/注册表/ICD 清单/escape 面）、vk_smoke（loader 链路）、adl_smoke（rok_adl.dll 加载与枚举） | `wine64 gpu_probe.exe` 等（见 §6） |
+| L3 内核管线 | Windows VM（QEMU ati-vga 等） | KMD 真装：AddDevice→StartDevice→分配→提交→fence→escape 全链 | §2 起的 VM runbook |
+
+L1 用 mock 内核原语（注册表内存表/池/cpuid 钩子）编译 kmd/src 的**真实
+源码字节**（sha256 前后校验，防测试漂移），是 KMD 逻辑改动的第一道回归；
+L2/L3 分别在 Wine 与 Windows VM 里做集成验证。三层都不需要真实 TeraScale 卡。
+
 ## 1. KMD 侧机制（kmd/src/sim.c）
 
 | 组件 | 说明 |
@@ -132,3 +144,48 @@ dd <SimRegisterSpace> L8          ; 写入的模拟寄存器值
 | fence 即时完成 | VM 里无法验证 IH 中断/超时（TDR）路径 —— 这两块仍需真实卡（M3 验收门） |
 | VRAM 全 0 | escape QUERY_VRAM 在 M3 前恒为 0，VM 与真机行为一致 |
 | ati-vga 的 Rage 128 语义 | QEMU 的 ati-vga 实现了 Mach64/Rage128 的寄存器子集；rokmd 模拟模式不与它交互，仅占用其 PCI 形态 |
+
+## 6. L2 参考实现：Wine 实跑记录（2026-11，Linux 沙箱）
+
+无需 Windows 也能跑 L2 用户态冒烟 —— 便携 llvm-mingw 交叉编译 + 便携
+Wine（Kron4ek amd64 包，纯 64 位前缀 `wine64` 即可，无 32 位依赖）：
+
+```bash
+# 工具链（构建脚本自动探测 /home/z/tools/llvm-mingw-*-x86_64）
+bash tests/gpu_probe/build-mingw.sh
+bash tests/vk_smoke/build-mingw.sh
+bash tests/adl_smoke/build-mingw.sh
+
+# Wine（前缀首跑 wineboot -i，之后直接运行）
+export WINEPREFIX=~/wine-prefix WINEDEBUG=-all
+wine64 tests/gpu_probe/gpu_probe.exe
+wine64 tests/vk_smoke/vk_smoke.exe
+wine64 tests/adl_smoke/adl_smoke.exe
+```
+
+实测输出要点（KVM 沙箱，无真实 GPU / 无宿主 Vulkan ICD）：
+
+```text
+gpu_probe : [1] "Wine GPU" 枚举成功；[1.5] hypervisor=KVMKVMKVM；
+            [2] D3DKMT 1 适配器（LUID 有效，UMD 查询 0xC0000002 = Wine 无
+            该 DDI，预期）；[2.5] winevulkan.json 清单读出；
+            [3] 3 个 instance extensions，vkCreateInstance=-9（无宿主 ICD，
+            预期）；[4] escape 探测优雅降级（0xC0000017 非 rokmd，预期）。
+vk_smoke  : vulkan-1.dll 加载 ✓ → vkCreateInstance -9（同上环境边界）。
+adl_smoke : ADL2_Main_Control_Create → 枚举无 rokmd 绑定适配器 → 跳过
+            （exit 0）—— shim 的控制面/枚举路径在 Wine 下真实执行。
+```
+
+Wine 层的**预期失败**（无宿主 GPU/ICD）恰好验证了测试程序的降级路径：
+所有失败都优雅退出而非崩溃。真实验证仍以 L3 Windows VM 为准。
+
+## 7. L1 参考输出（host unit tests，2026-11）
+
+```text
+==== host tests: 78 checks, 0 failed ====   （ASan/UBSan 全程无告警）
+```
+
+覆盖：PM4 type-0/2/3 解码、INDIRECT_BUFFER 字段捕获、跨界残包安全终止、
+非 sim 短路；CCC 遗留名兜底/专有名优先/范围钳制/空键默认/NULL 防御；
+escape set 版本校验/钳化/roundtrip/Overdrive 归一化；sim 三路判定全分支。
+

@@ -465,11 +465,11 @@ static void RokProbeVulkanIcdRegistry(void)
         if (RegOpenKeyExW(roots[r].root, L"SOFTWARE\\Khronos\\Vulkan\\Drivers",
                           0, KEY_READ, &hKey) != ERROR_SUCCESS)
         {
-            printf("  %s: (no key)\n", roots[r].label);
+            printf("  %ls: (no key)\n", roots[r].label);
             continue;
         }
 
-        printf("  %s:\\SOFTWARE\\Khronos\\Vulkan\\Drivers:\n", roots[r].label);
+        printf("  %ls:\\SOFTWARE\\Khronos\\Vulkan\\Drivers:\n", roots[r].label);
         while (RegEnumValueW(hKey, index++, name, &nameLen, NULL,
                              &type, data, &dataSize) == ERROR_SUCCESS)
         {
@@ -484,9 +484,14 @@ static void RokProbeVulkanIcdRegistry(void)
 
     {
         char buf[1024];
-        DWORD sz = sizeof(buf);
-        if (GetEnvironmentVariableA("VK_ICD_FILENAMES", buf, &sz) > 0 ||
-            GetEnvironmentVariableA("VK_DRIVER_FILES", buf, &sz) > 0)
+        /* GetEnvironmentVariableA 第三参为 DWORD 值（非指针）；
+         * 优先 VK_ICD_FILENAMES，回退 VK_DRIVER_FILES（新版 loader 名）。 */
+        DWORD n = GetEnvironmentVariableA("VK_ICD_FILENAMES", buf,
+                                          (DWORD)sizeof(buf));
+        if (n == 0)
+            n = GetEnvironmentVariableA("VK_DRIVER_FILES", buf,
+                                        (DWORD)sizeof(buf));
+        if (n > 0 && n < (DWORD)sizeof(buf))
             printf("  env override: %s\n", buf);
     }
 }
