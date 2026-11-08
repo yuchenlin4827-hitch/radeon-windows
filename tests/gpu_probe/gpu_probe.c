@@ -968,8 +968,14 @@ int main(int argc, char **argv)
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
 
-    printf("gpu_probe — radeon-windows M0 探测工具\n");
-    printf("目标：弄清 Windows 图形栈当前状态（PCI / WDDM / Vulkan）\n");
+    /* 源码字符串是 UTF-8 编码；不切控制台代码页时，中文 Windows
+     * （cp936/cp950）与传统 cmd 下会显示乱码。65001 即 UTF-8，
+     * Win10 1809+ 的 conhost / Windows Terminal 均支持。 */
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    printf("gpu_probe — radeon-windows 图形栈探测工具\n");
+    printf("目标：弄清 Windows 图形栈当前状态（PCI / WDDM / Vulkan / rokmd escape）\n");
 
     RokProbePciDisplayDevices();
     RokProbeHypervisor();
