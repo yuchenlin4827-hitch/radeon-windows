@@ -137,6 +137,11 @@ vk_audit.exe --strict   :: 有缺口时返回非零退出码（CI 友好）
 > loader 上会误报 `global export missing: vkEnumeratePhysicalDevices`）。
 > `vkCreateInstance` 失败时额外输出诊断：实际加载的 DLL 路径、
 > `VK_DRIVER_FILES`/`VK_ICD_FILENAMES`、注册表 ICD 清单（64/32 位视图）。
+>
+> **v1.2**：逐份解析注册到的 ICD manifest JSON（提取 `library_path`、
+> 按 JSON 所在目录拼接完整路径、检查 DLL 存在性、显示 `api_version`），
+> 直接区分「注册表残留 / DLL 已丢失」与「DLL 在但硬件不支持（AMDVLK
+> 仅覆盖 GCN+，TeraScale 从未受支持）」两类无 ICD 原因。
 
 产物由 `build-umd.yml` 每次提交自动构建（Actions → Artifacts）；
 本地复现见 `tools/vk_audit/build-mingw.sh`。
