@@ -50,7 +50,7 @@ typedef enum _ROK_ESCAPE_TYPE
 {
     ROK_ESC_TYPE_QUERY_VERSION   = 1,    // -> ROK_ESC_VERSION_OUT
     ROK_ESC_TYPE_QUERY_PCI_ID    = 2,    // -> ROK_ESC_PCI_ID_OUT
-    ROK_ESC_TYPE_QUERY_VRAM      = 3,    // -> ROK_ESC_VRAM_OUT（M3 前全 0）
+    ROK_ESC_TYPE_QUERY_VRAM      = 3,    // -> ROK_ESC_VRAM_OUT（M3.1 起填探测值）
     ROK_ESC_TYPE_QUERY_CAPS      = 4,    // -> ROK_ESC_CAPS_OUT
     ROK_ESC_TYPE_QUERY_SEGMENT_INFO = 5, // -> ROK_ESC_SEGMENT_INFO_OUT（M3 前全 0）
     ROK_ESC_TYPE_QUERY_SIM_STATUS = 6,   // -> ROK_ESC_SIM_STATUS_OUT（M2.6，sim.c）
@@ -106,8 +106,8 @@ typedef struct _ROK_ESC_PCI_ID_OUT
 
 typedef struct _ROK_ESC_VRAM_OUT
 {
-    ROK_U64 VramSizeBytes;  // M3 前为 0
-    ROK_U64 GartSizeBytes;  // M3 前为 0
+    ROK_U64 VramSizeBytes;  // M3.1 起为探测值（CONFIG_MEMSIZE / sim 配置）
+    ROK_U64 GartSizeBytes;  // GTT 未落地（M3.2）前为 0
     ROK_U32 VramSegmentId;  // QuerySegment 上报的段号；0 = 暂无段
     ROK_U32 Reserved;
 } ROK_ESC_VRAM_OUT, *PROK_ESC_VRAM_OUT;
@@ -119,7 +119,7 @@ typedef struct _ROK_ESC_CAPS_OUT
     ROK_U32 Reserved[2];
 } ROK_ESC_CAPS_OUT, *PROK_ESC_CAPS_OUT;
 
-// 段信息（M3 落地 VRAM/GTT 段后由 KMD 填充真实值；M4 的 ICD 用它
+// 段信息（M3.1 填 VRAM 尺寸 + POPULATED 位；段号 M3.2 起填充。M4 的 ICD 用它
 // 决定 VkMemoryHeap/Type 布局 —— deviceLocal 堆 = VRAM 段）。
 typedef struct _ROK_ESC_SEGMENT_INFO_OUT
 {
@@ -230,10 +230,14 @@ C_ASSERT(sizeof(ROK_ESC_HW_RESET_OUT) == 32);
 #endif
 
 // TeraScale 家族 ABI 值（QUERY_PCI_ID / QUERY_HW_INFO 的 Family 字段）。
-// 精确 DID→芯片分发表与启发式自 M3.1 起迁至 kmd/src/r600hw.c
-// （RokHwLookupChip / RokHwFamilyHeuristic；源：Mesa r600_pci_ids.h）。
-// 更正：Mesa 表无 SEYMOUR 组 —— 0x6766（HD 6490M）与 0x6779（HD 7470）
-// 同归 CAICOS；0x6840-0x6859 为 TURKS（旧注释误标 0x6840 为 Seymour）。
+// 精确 DID→芯片分发表与兜底启发式自 M3.1 起迁至 kmd/src/r600hw.c
+// （RokHwLookupChip / RokHwFamilyHeuristic；源：Mesa r600_pci_ids.h，
+// 与 umd/gl46/gl46_r600g.c 的一致性由 scripts/check_pci_tables.py 机械校验）。
+// 勘误存档（v0.2.1 内联启发式时期，均已由精确表纠正）：
+//   * 旧段规则曾把 0x6840 标为 Seymour —— 实为 Thames/TURKS 段；
+//   * Mesa 表无 SEYMOUR 组：0x6760-0x677B 全归 CAICOS（HD 6490M = 0x6766
+//     亦在其中），实机 HD 7470M 候选 DID（0x6760 / 0x6779）均判 TS2；
+//   * 22 用例家族回归见 scripts/test_family.c（已迁移至新 API）。
 #define ROK_GPU_FAMILY_TS1  1
 #define ROK_GPU_FAMILY_TS2  2
 #define ROK_GPU_FAMILY_TS3  3

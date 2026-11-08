@@ -160,19 +160,27 @@ RokHwChipName(_In_ ULONG Chip)
     }
 }
 
+// 兜底启发式 —— 分段规则与迁移前 rok_escape.h 内联启发式逐条一致
+// （scripts/test_family.c 22 用例回归守护；勿并宽段：0x9400-0x943F 是
+// R600、0x94C0+ 是 RV620、0x961x 是 RS780、0x97xx 是 RS880，全为 TS1）。
 ULONG
 RokHwFamilyHeuristic(_In_ ULONG DeviceId)
 {
-    if ((DeviceId >= 0x6700 && DeviceId <= 0x671F) ||
-        (DeviceId >= 0x9900 && DeviceId <= 0x99AF))
+    if ((DeviceId >= 0x6700 && DeviceId <= 0x672F) ||   // Cayman/Blackcomb
+        (DeviceId >= 0x9900 && DeviceId <= 0x99AF))     // Trinity
     {
-        return ROK_GPU_FAMILY_TS3;      // Cayman / Trinity
+        return ROK_GPU_FAMILY_TS3;
     }
-    if (DeviceId >= 0x9400 && DeviceId <= 0x9900)
+    if ((DeviceId >= 0x6730 && DeviceId <= 0x674F) ||   // Barts
+        (DeviceId >= 0x6750 && DeviceId <= 0x677F) ||   // Turks/Lombok/Seymour/Caicos
+        (DeviceId >= 0x6840 && DeviceId <= 0x68FF) ||   // Thames/Evergreen/NI 独显
+        (DeviceId >= 0x9440 && DeviceId <= 0x94BF) ||   // RV770/RV730/RV740
+        (DeviceId >= 0x9540 && DeviceId <= 0x955F) ||   // RV710/RV730 变体段
+        (DeviceId >= 0x9640 && DeviceId <= 0x964F))     // Sumo（Llano）
     {
-        return ROK_GPU_FAMILY_TS2;      // Evergreen / Northern Islands 主段
+        return ROK_GPU_FAMILY_TS2;
     }
-    return ROK_GPU_FAMILY_TS1;          // R600-RV770 主段兜底
+    return ROK_GPU_FAMILY_TS1;          // R600/RV6xx/RS780/RS880 主段兜底
 }
 
 // ---- BAR0 直访（边界检查）----

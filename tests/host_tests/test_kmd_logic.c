@@ -461,6 +461,12 @@ static void TestHwChipTable(void)
     CHECK(RokHwFamilyHeuristic(0x9490) == ROK_GPU_FAMILY_TS2);   // RV7xx 主段
     CHECK(RokHwFamilyHeuristic(0x7100) == ROK_GPU_FAMILY_TS1);   // R600 早期
     CHECK(RokHwFamilyHeuristic(0x5046) == ROK_GPU_FAMILY_TS1);   // 未收录兜底
+    // TS1 边界守卫（test_family.c 迁移回归曾抓到宽段 0x9400-0x9900 误吞）：
+    // 这些段紧邻 TS2 区间，合并时切勿并宽。
+    CHECK(RokHwFamilyHeuristic(0x9400) == ROK_GPU_FAMILY_TS1);   // R600 HD 2900
+    CHECK(RokHwFamilyHeuristic(0x94C5) == ROK_GPU_FAMILY_TS1);   // RV620 HD 3450
+    CHECK(RokHwFamilyHeuristic(0x9615) == ROK_GPU_FAMILY_TS1);   // RS780 HD 3200
+    CHECK(RokHwFamilyHeuristic(0x9712) == ROK_GPU_FAMILY_TS1);   // RS880 HD 4250
 
     // 段边界采样（全表升序/无重复由 scripts/check_pci_tables.py 机械校验）。
     TEST_BEGIN("[5a2] hw chip table — 段边界");

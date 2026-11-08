@@ -60,6 +60,17 @@ typedef struct _ROK_D3DKMT_QUERYADAPTERINFO {
 } ROK_D3DKMT_QUERYADAPTERINFO;
 
 #define ROK_KMTQAITYPE_UMDRIVERNAME 1   // KMTQAITYPE_UMDRIVERNAME（26100 枚举值）
+#define ROK_KMTQAITYPE_UMD_DRIVER_VERSION 2    // out: 8 字节打包版本 a.b.c.d
+#define ROK_KMTQAITYPE_ADAPTERREGISTRYINFO 3   // out: DriverName + PnpString
+
+typedef struct _ROK_D3DKMT_UMDDRIVERVERSION {
+    DWORDLONG DriverVersion;         // out: a.b.c.d 打包（与 SetupAPI DriverVersion 同源）
+} ROK_D3DKMT_UMDDRIVERVERSION;
+
+typedef struct _ROK_D3DKMT_ADAPTERREGISTRYINFO {
+    WCHAR DriverName[ROK_MAX_PATH];  // out: 驱动注册表名
+    WCHAR PnpString[ROK_MAX_PATH];   // out: 如 PCI\VEN_1002&DEV_6760 —— 适配器↔设备对照
+} ROK_D3DKMT_ADAPTERREGISTRYINFO;
 
 typedef ULONG ROK_D3DKMT_HANDLE;
 typedef NTSTATUS (WINAPI *PFN_D3DKMTEnumAdapters2)(ROK_D3DKMT_ENUMADAPTERS2 *);
@@ -395,7 +406,19 @@ static void RokProbeD3DKMTAdapters(void)
     {
         ROK_D3DKMT_QUERYADAPTERINFO qi;
         ROK_D3DKMT_UMDFILENAMEINFO umd;
-        const char *umdFamily = "unknown";
+        ROK_D3DKMT_UMDDRIVERVERSION umdver;
+        ROK_D3DKMT_ADAPTERREGISTRYINFO reginfo;
+        /* 逐版本族查询：传统驱动（如 TeraScale 的 aticfx）只有 DX9/DX10/DX11 UMD，
+         * 没有 DX12 —— 硬编码单个族会在真实硬件上 0xC000000D（HD 7470M 实测教训） */
+        static const struct { ROK_KMTUMDVERSION v; const char *name; } fams[] = {
+            { ROK_KMTUMDVERSION_DX9,        "DX9"        },
+            { ROK_KMTUMDVERSION_DX10,       "DX10"       },
+            { ROK_KMTUMDVERSION_DX11,       "DX11"       },
+            { ROK_KMTUMDVERSION_DX12,       "DX12"       },
+            { ROK_KMTUMDVERSION_DX12_WSA32, "DX12-WSA32" },
+            { ROK_KMTUMDVERSION_DX12_WSA64, "DX12-WSA64" },
+        };
+        ULONG f, okFamilies = 0, hi, lo;
 
         printf("  ---- adapter #%lu ----\n", i);
         printf("  handle      : 0x%08lX\n", (unsigned long)enumAdapters.pAdapters[i].hAdapter);
@@ -404,33 +427,54 @@ static void RokProbeD3DKMTAdapters(void)
                (unsigned long)enumAdapters.pAdapters[i].AdapterLuid.LowPart);
         printf("  sources     : %lu\n", enumAdapters.pAdapters[i].NumOfSources);
 
-        ZeroMemory(&umd, sizeof(umd));
-        umd.Version = ROK_KMTUMDVERSION_DX12;
+        /* 注册表信息：PnpString 直接给出 PCI ID，可与 [1] 段设备一一对上 */
+        ZeroMemory(&reginfo, sizeof(reginfo));
         ZeroMemory(&qi, sizeof(qi));
         qi.hAdapter = enumAdapters.pAdapters[i].hAdapter;
-        qi.Type = ROK_KMTQAITYPE_UMDRIVERNAME;
-        qi.pPrivateDriverData = &umd;
-        qi.PrivateDriverDataSize = sizeof(umd);
-        st = pQueryAdapterInfo(&qi);
-        if (st == 0)
+        qi.Type = ROK_KMTQAITYPE_ADAPTERREGISTRYINFO;
+        qi.pPrivateDriverData = &reginfo;
+        qi.PrivateDriverDataSize = sizeof(reginfo);
+        if (pQueryAdapterInfo(&qi) == 0)
+            printf("  registry    : driver=%ls  pnp=%ls\n",
+                   reginfo.DriverName, reginfo.PnpString);
+
+        for (f = 0; f < sizeof(fams) / sizeof(fams[0]); f++)
         {
-            switch (umd.Version)
+            ZeroMemory(&umd, sizeof(umd));
+            umd.Version = fams[f].v;
+            ZeroMemory(&qi, sizeof(qi));
+            qi.hAdapter = enumAdapters.pAdapters[i].hAdapter;
+            qi.Type = ROK_KMTQAITYPE_UMDRIVERNAME;
+            qi.pPrivateDriverData = &umd;
+            qi.PrivateDriverDataSize = sizeof(umd);
+            st = pQueryAdapterInfo(&qi);
+            if (st == 0)
             {
-            case ROK_KMTUMDVERSION_DX9:  umdFamily = "DX9";  break;
-            case ROK_KMTUMDVERSION_DX10: umdFamily = "DX10"; break;
-            case ROK_KMTUMDVERSION_DX11: umdFamily = "DX11"; break;
-            case ROK_KMTUMDVERSION_DX12: umdFamily = "DX12"; break;
-            case ROK_KMTUMDVERSION_DX12_WSA32: umdFamily = "DX12-WSA32"; break;
-            case ROK_KMTUMDVERSION_DX12_WSA64: umdFamily = "DX12-WSA64"; break;
-            default: umdFamily = "unknown"; break;
+                printf("  UMD dll     : %ls  (family: %s)\n",
+                       umd.UmdFileName, fams[f].name);
+                okFamilies++;
             }
-            printf("  UMD dll     : %ls  (version family: %s)\n",
-                   umd.UmdFileName, umdFamily);
-            printf("                ^^^ terakan/rokmd 集成后此处应出现对应 DLL\n");
         }
+        if (okFamilies > 0)
+            printf("                ^^^ terakan/rokmd 集成后此处应出现对应 DLL\n");
         else
+            printf("  UMD query   : failed for all families (last status=0x%08lX)\n",
+                   (unsigned long)st);
+
+        /* UMD 驱动版本号（预期与 [1] 段 SetupAPI 的 DriverVersion 一致） */
+        ZeroMemory(&umdver, sizeof(umdver));
+        ZeroMemory(&qi, sizeof(qi));
+        qi.hAdapter = enumAdapters.pAdapters[i].hAdapter;
+        qi.Type = ROK_KMTQAITYPE_UMD_DRIVER_VERSION;
+        qi.pPrivateDriverData = &umdver;
+        qi.PrivateDriverDataSize = sizeof(umdver);
+        if (pQueryAdapterInfo(&qi) == 0)
         {
-            printf("  UMD query   : failed status=0x%08lX\n", (unsigned long)st);
+            hi = (ULONG)(umdver.DriverVersion >> 32);
+            lo = (ULONG)(umdver.DriverVersion & 0xFFFFFFFFULL);
+            printf("  UMD version : %lu.%lu.%lu.%lu\n",
+                   (unsigned long)(hi >> 16), (unsigned long)(hi & 0xFFFF),
+                   (unsigned long)(lo >> 16), (unsigned long)(lo & 0xFFFF));
         }
     }
 

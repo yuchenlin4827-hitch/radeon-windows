@@ -304,7 +304,8 @@ typedef struct _ROK_ADAPTER {
     ROK_CCC_SETTINGS CccSettings;
 } ROK_ADAPTER, *PROK_ADAPTER;
 
-/* rok_escape.h 真实头（用户态分支；RokGpuFamilyFromDeviceId 为其自带 static inline）*/
+/* rok_escape.h 真实头（用户态分支；M3.1 起仅存家族 ABI 值与 escape 结构，
+   分发表/启发式已迁至 kmd/src/r600hw.c）*/
 #include "rok_escape.h"
 NTSTATUS RokCccGetSettings(PROK_ADAPTER a, ROK_CCC_SETTINGS *s);
 NTSTATUS RokCccSetSettings(PROK_ADAPTER a, const ROK_CCC_SETTINGS *s);
