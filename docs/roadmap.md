@@ -100,6 +100,18 @@ TeraScale 2 家族**；寄存器编程序列在 r600 家族内通用）。
 **验收门**：KMD 日志完整走通"探测 → 复位 → ring 空转 → 收到一条 IH 中断"；
 提交 NOP IB 无 TDR。
 
+**M3.1 进展（v0.2.2-alpha）** ✅：
+- PCI 家族分发表修正：Seymour/Caicos/Turks/Lombok/Thames 全段归入 TS2
+  （v0.2.1 实测修正——旧表 0x6760 误判 TS1；0x6840 实为 Thames 段）。
+- VRAM 大小探测落地：真实路径读 `CONFIG_MEMSIZE`（0x5428，KB，与
+  `r600.c` 同源）；模拟路径 `<DriverKey>\Parameters\VramSizeMb`
+  （默认 256MB）。
+- escape `QUERY_VRAM` / `QUERY_SEGMENT_INFO` 开始回填探测值
+  （VRAM POPULATED 位如实设置）。GTT/段号待 3.6。
+- 真机 bring-up 风险与恢复流程入档：见
+  [bringup-safety.md](bringup-safety.md)（render-only 接管唯一显示 GPU
+  = 无头风险，虚拟机先行）。
+
 ## M4 —— terakan 接自研 KMD ⬜
 
 **目标**：Vulkan ICD 不再依赖官方 Catalyst KMD，整个栈全开源。

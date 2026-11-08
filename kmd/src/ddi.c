@@ -1106,9 +1106,10 @@ RokDdiEscape(
             return STATUS_BUFFER_TOO_SMALL;
         }
         out = (PROK_ESC_VRAM_OUT)(header + 1);
-        // M3 前 0 段：显存/GTT 尺寸未知。ICD 应改用 QUERY_SEGMENT_INFO。
-        out->VramSizeBytes = 0;
-        out->GartSizeBytes = 0;
+        // M3.1：显存大小已探测（真实 CONFIG_MEMSIZE / 模拟注册表配置）；
+        // VramSegmentId 在 M3.2 QueryVidMmSegments 落地前保持 0。
+        out->VramSizeBytes = adapter->VramSizeBytes;
+        out->GartSizeBytes = adapter->GartSizeBytes;
         out->VramSegmentId = 0;
         out->Reserved = 0;
         return STATUS_SUCCESS;
@@ -1148,13 +1149,13 @@ RokDdiEscape(
             return STATUS_BUFFER_TOO_SMALL;
         }
         out = (PROK_ESC_SEGMENT_INFO_OUT)(header + 1);
-        // M3 前全 0：VRAM/GTT 段尚未建立；M3 探测后填充真实尺寸/段号并
-        // 置 ROK_SEG_FLAG_*_POPULATED（ICD 依此构造 VkMemoryHeap 布局）。
-        out->VramSizeBytes = 0;
-        out->GartSizeBytes = 0;
+        // M3.1：VRAM 尺寸已探测（POPULATED 位如实设置）；段号 M3.2 起
+        // QueryVidMmSegments 落地后填充（ICD 依此构造 VkMemoryHeap 布局）。
+        out->VramSizeBytes = adapter->VramSizeBytes;
+        out->GartSizeBytes = adapter->GartSizeBytes;
         out->VramSegmentId = 0;
         out->GartSegmentId = 0;
-        out->Flags = 0;
+        out->Flags = (adapter->VramSizeBytes > 0) ? ROK_SEG_FLAG_VRAM_POPULATED : 0;
         out->Reserved = 0;
         return STATUS_SUCCESS;
     }

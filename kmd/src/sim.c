@@ -238,6 +238,19 @@ RokSimInitialize(
     }
     RtlZeroMemory(Adapter->SimRegisterSpace, Adapter->SimRegisterSpaceSize);
 
+    // 显存配置（M3.1）：<DriverKey>\Parameters\VramSizeMb 覆盖，默认 256MB。
+    {
+        ULONG vramMb = 0;
+        if (!(DeviceRegistryPath != NULL && DeviceRegistryPath->Buffer != NULL &&
+              RokSimRegReadUlong(DeviceRegistryPath, L"Parameters", L"VramSizeMb",
+                                 &vramMb)) ||
+            vramMb == 0)
+        {
+            vramMb = 256;
+        }
+        Adapter->VramSizeBytes = (UINT64)vramMb * 1024ULL * 1024ULL;
+    }
+
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
                "rokmd: SIM MODE — VID=0x%04X DID=0x%04X hv=%u (reg=%u id=%u)\n",
                Adapter->PciVendorId, Adapter->PciDeviceId,

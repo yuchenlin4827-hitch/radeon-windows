@@ -46,7 +46,7 @@ typedef enum _ROK_ESCAPE_TYPE
 {
     ROK_ESC_TYPE_QUERY_VERSION   = 1,    // -> ROK_ESC_VERSION_OUT
     ROK_ESC_TYPE_QUERY_PCI_ID    = 2,    // -> ROK_ESC_PCI_ID_OUT
-    ROK_ESC_TYPE_QUERY_VRAM      = 3,    // -> ROK_ESC_VRAM_OUT（M3 前全 0）
+    ROK_ESC_TYPE_QUERY_VRAM      = 3,    // -> ROK_ESC_VRAM_OUT（M3.1 起填探测值）
     ROK_ESC_TYPE_QUERY_CAPS      = 4,    // -> ROK_ESC_CAPS_OUT
     ROK_ESC_TYPE_QUERY_SEGMENT_INFO = 5, // -> ROK_ESC_SEGMENT_INFO_OUT（M3 前全 0）
     ROK_ESC_TYPE_QUERY_SIM_STATUS = 6,   // -> ROK_ESC_SIM_STATUS_OUT（M2.6，sim.c）
@@ -99,8 +99,8 @@ typedef struct _ROK_ESC_PCI_ID_OUT
 
 typedef struct _ROK_ESC_VRAM_OUT
 {
-    ROK_U64 VramSizeBytes;  // M3 前为 0
-    ROK_U64 GartSizeBytes;  // M3 前为 0
+    ROK_U64 VramSizeBytes;  // M3.1 起为探测值（CONFIG_MEMSIZE / sim 配置）
+    ROK_U64 GartSizeBytes;  // GTT 未落地（M3.2）前为 0
     ROK_U32 VramSegmentId;  // QuerySegment 上报的段号；0 = 暂无段
     ROK_U32 Reserved;
 } ROK_ESC_VRAM_OUT, *PROK_ESC_VRAM_OUT;
@@ -112,7 +112,7 @@ typedef struct _ROK_ESC_CAPS_OUT
     ROK_U32 Reserved[2];
 } ROK_ESC_CAPS_OUT, *PROK_ESC_CAPS_OUT;
 
-// 段信息（M3 落地 VRAM/GTT 段后由 KMD 填充真实值；M4 的 ICD 用它
+// 段信息（M3.1 填 VRAM 尺寸 + POPULATED 位；段号 M3.2 起填充。M4 的 ICD 用它
 // 决定 VkMemoryHeap/Type 布局 —— deviceLocal 堆 = VRAM 段）。
 typedef struct _ROK_ESC_SEGMENT_INFO_OUT
 {
@@ -193,10 +193,13 @@ C_ASSERT(sizeof(ROK_ESC_ENGINE_STATUS_OUT) == 32);
 #endif
 
 // TeraScale 家族启发式（M3 用完整分发表替换）。
-// 依据 Linux radeon PCI 表的 ID 段分布：
+// 依据 Linux 内核 radeon drm_pciids.h / pci.ids 核对（v0.2.1 实测修正：旧表
+// 把 Seymour 误标 0x6840 —— 那是 Thames 段；实机 HD 7470M = 0x6760 曾被
+// 误判 TS1）。
 //   0x6700-0x671F / 0x9900-0x99AF -> TeraScale 3（Cayman / Trinity）
-//   0x67xx(高段)/0x68xx/0x94xx-0x97xx/0x98xx -> TeraScale 1/2
-//   其余（0x79xx R600 早期）-> TeraScale 1
+//   0x6750-0x675F（Turks/Lombok）、0x6760-0x677F（Seymour/Caicos）、
+//   0x6840-0x6849（Thames）、0x9400-0x98FF（Evergreen/NI/Sumo） -> TeraScale 2
+//   其余（0x79xx R600 早期、RV770 等）-> TeraScale 1
 #define ROK_GPU_FAMILY_TS1  1
 #define ROK_GPU_FAMILY_TS2  2
 #define ROK_GPU_FAMILY_TS3  3
@@ -207,22 +210,36 @@ RokGpuFamilyFromDeviceId(ROK_U32 DeviceId)
 {
     switch (DeviceId)
     {
-    case 0x6840:    // Seymour (HD 6490M) — 主验证卡
-    case 0x6841:
+    case 0x6760:    // Seymour (HD 6400M/7400M) — 主验证卡（实机 HD 7470M DID）
+    case 0x6761:
+    case 0x6766:    // Caicos
+    case 0x6767:
+    case 0x6768:
+    case 0x6770:
+    case 0x6771:
+    case 0x6772:
+    case 0x6778:    // Caicos XT (HD 7470/8470 OEM)
     case 0x6779:    // Caicos (HD 7470M) — 主验证卡
     case 0x677B:
+    case 0x6840:    // Thames (HD 7600M/7700M)——旧表曾误标 Seymour
+    case 0x6841:
         return ROK_GPU_FAMILY_TS2;
     default:
         break;
     }
-    if ((DeviceId >= 0x6700 && DeviceId <= 0x671F) ||
-        (DeviceId >= 0x9900 && DeviceId <= 0x99AF))
+    if ((DeviceId >= 0x6700 && DeviceId <= 0x672F) ||      // Cayman/Blackcomb
+        (DeviceId >= 0x9900 && DeviceId <= 0x99AF))        // Trinity
     {
         return ROK_GPU_FAMILY_TS3;
     }
-    if (DeviceId >= 0x9400 && DeviceId <= 0x9900)
+    if ((DeviceId >= 0x6730 && DeviceId <= 0x674F) ||   // Barts（HD 6870/6850）
+        (DeviceId >= 0x6750 && DeviceId <= 0x677F) ||   // Turks/Lombok/Seymour/Caicos
+        (DeviceId >= 0x6840 && DeviceId <= 0x68FF) ||   // Thames/Evergreen/Cedar
+        (DeviceId >= 0x9440 && DeviceId <= 0x94BF) ||   // RV770/RV730/RV740
+        (DeviceId >= 0x9540 && DeviceId <= 0x955F) ||   // RV730/RV740 变体
+        (DeviceId >= 0x9640 && DeviceId <= 0x964F))     // Sumo（Llano 内显）
     {
-        return ROK_GPU_FAMILY_TS2;      // Evergreen / Northern Islands 主段
+        return ROK_GPU_FAMILY_TS2;
     }
-    return ROK_GPU_FAMILY_TS1;          // R600-RV770 主段
+    return ROK_GPU_FAMILY_TS1;          // R600/RV6xx/RV670/RS780/RS880 主段
 }

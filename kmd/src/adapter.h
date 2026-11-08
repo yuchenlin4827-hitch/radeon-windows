@@ -39,6 +39,13 @@ typedef struct _ROK_ADAPTER {
     ULONG           MmioLength;
     PVOID           MmioVirtualAddress;     // StopDevice 时 DxgkCbUnmapMemory
 
+    // ---- 显存探测（M3.1）----
+    // 真实路径：BAR0 直接窗口读 CONFIG_MEMSIZE（0x5428，KB 单位，依据
+    // Linux radeon R600_CONFIG_MEMSIZE）；模拟路径：<DriverKey>\Parameters
+    // \VramSizeMb 覆盖（默认 256MB，sim.c）。GTT 尺寸 M3.2 落地前保持 0。
+    UINT64          VramSizeBytes;
+    UINT64          GartSizeBytes;
+
     // ---- 命令进度 ----
     // "即时完成"模型：提交即完成，OS 经 DxgkDdiQueryCurrentFence 轮询
     // LastCompletedFenceId 回收 DMA buffer；M3 换 IH ring 真实 fence 后，

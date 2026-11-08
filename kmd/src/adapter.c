@@ -127,6 +127,61 @@ RokAdapterMapMmio(
 }
 
 // ------------------------------------------------------------------
+// 显存探测（M3.1）
+// ------------------------------------------------------------------
+
+// TeraScale（R600..Northern Islands）：CONFIG_MEMSIZE 位于 MMIO 直接窗口
+// 0x5428，单位 KB（对照 Linux radeon R600_CONFIG_MEMSIZE / evergreen.c 的
+// RREG32(CONFIG_MEMSIZE) * 1024）。此偏移无需 MM_INDEX/MM_DATA 间接寻址。
+#define ROK_MMIO_CONFIG_MEMSIZE   0x5428
+#define ROK_VRAM_MIN_BYTES        (16ULL * 1024 * 1024)         // 16MB
+#define ROK_VRAM_MAX_BYTES        (16ULL * 1024 * 1024 * 1024)  // 16GB
+
+static VOID
+RokAdapterProbeVram(
+    _Inout_ PROK_ADAPTER Adapter
+    )
+{
+    if (Adapter->SimulationMode)
+    {
+        // sim.c 已按注册表 VramSizeMb（默认 256）填 VramSizeBytes。
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: VRAM (sim) = %I64u bytes\n", Adapter->VramSizeBytes));
+        return;
+    }
+
+    Adapter->VramSizeBytes = 0;
+    if (Adapter->MmioVirtualAddress == NULL ||
+        Adapter->MmioLength < ROK_MMIO_CONFIG_MEMSIZE + sizeof(ULONG))
+    {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                   "rokmd: VRAM probe skipped (no MMIO window)\n"));
+        return;
+    }
+
+    {
+        ULONG kb = READ_REGISTER_ULONG(
+            (volatile ULONG *)((PUCHAR)Adapter->MmioVirtualAddress +
+                               ROK_MMIO_CONFIG_MEMSIZE));
+        UINT64 bytes = (UINT64)kb * 1024;
+
+        if (bytes >= ROK_VRAM_MIN_BYTES && bytes <= ROK_VRAM_MAX_BYTES)
+        {
+            Adapter->VramSizeBytes = bytes;
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                       "rokmd: VRAM probed = %I64u bytes (CONFIG_MEMSIZE=0x%X KB)\n",
+                       bytes, kb));
+        }
+        else
+        {
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+                       "rokmd: CONFIG_MEMSIZE=0x%X KB out of range — not reported\n",
+                       kb));
+        }
+    }
+}
+
+// ------------------------------------------------------------------
 // 生命周期 DDI
 // ------------------------------------------------------------------
 
@@ -243,6 +298,9 @@ RokDdiStartDevice(
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
                    "rokmd: BAR0 unmapped — continue in pure render-only mode\n"));
     }
+
+    // 显存探测（M3.1）：模拟路径取注册表配置，真实路径读 CONFIG_MEMSIZE。
+    RokAdapterProbeVram(adapter);
 
     adapter->Started = TRUE;
 
