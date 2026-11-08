@@ -102,7 +102,8 @@ gpu_probe.exe
 ```
 
 `pci id` 显示 DID=0x5046 且 `caps` 带 `SIM` 位 = 模拟模式生效。
-`family=TS1` 是 RokGpuFamilyFromDeviceId 对未表列 DID 的默认值，
+`family=TS1` 是 RokHwIdentify 的兜底结果：DID 0x5046 未命中 r600hw.c
+精确表，回退 RokHwFamilyHeuristic 段规则默认 TS1，
 模拟设备不参与真实家族判定，属预期。
 
 ### 2.4 PM4 解码验证（M3 预演）

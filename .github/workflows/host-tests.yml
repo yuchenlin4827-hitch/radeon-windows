@@ -4,6 +4,8 @@
 #   * PM4 解码器（type-0/2/3 + INDIRECT_BUFFER + 跨界残包内存安全，ASan 兜底）
 #   * CCC 设置导入/钳制/escape set/get 闭环
 #   * sim 模式三路判定（设备 ID / 注册表 / hypervisor 自动）
+#   * M3.1/M3.2：芯片识别表、寄存器边界检查、GRBM WaitIdle/CP 软复位序列
+# 另跑 scripts/check_pci_tables.py（KMD/UMD 双表一致性机械校验）。
 # 每个 KMD 逻辑改动推送即回归 —— 不必等 Windows CI 的 WDK 构建。
 name: host-tests
 
@@ -25,3 +27,6 @@ jobs:
 
       - name: Run host unit tests (ASan/UBSan)
         run: bash tests/host_tests/build-and-run.sh
+
+      - name: Check PCI table parity (KMD vs UMD GL46)
+        run: python3 scripts/check_pci_tables.py

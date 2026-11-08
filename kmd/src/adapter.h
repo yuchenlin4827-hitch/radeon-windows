@@ -14,6 +14,7 @@
 #include "precomp.h"
 #include "sim.h"    // ROK_SIM_STATS（模拟设备统计，sim.c 实现）
 #include "ccc.h"    // ROK_CCC_SETTINGS（CCC 兼容设置，ccc.c 实现）
+#include "r600hw.h" // ROK_HW_CHIP_INFO（M3.1 芯片识别，r600hw.c 实现）
 
 typedef struct _ROK_ADAPTER {
     // ---- VidMm / 上下文簿记 ----
@@ -33,6 +34,10 @@ typedef struct _ROK_ADAPTER {
     ULONG           PciVendorId;
     ULONG           PciDeviceId;
     ULONG           PciRevisionId;
+
+    // ---- 硬件识别快照（M3.1，StartDevice 后段由 RokHwIdentify 填充）----
+    ROK_HW_CHIP_INFO HwChip;                // 精确表命中或启发式兜底
+    ULONG           HwGrbmStatus;           // GRBM_STATUS 只读快照（未映射 = 0）
 
     // ---- MMIO（BAR0）----
     PHYSICAL_ADDRESS MmioBase;
