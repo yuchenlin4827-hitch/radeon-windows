@@ -244,6 +244,11 @@ RokDdiStartDevice(
                    "rokmd: BAR0 unmapped — continue in pure render-only mode\n"));
     }
 
+    // 硬件识别快照（M3.1，r600hw.c）：精确分发表（120 个 Evergreen 家族
+    // DID，源：Mesa r600_pci_ids.h）→ 启发式兜底；BAR0 已映射时只读
+    // 采样 GRBM_STATUS。无任何硬件写副作用。
+    RokHwIdentify(adapter);
+
     adapter->Started = TRUE;
 
     KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,

@@ -267,3 +267,60 @@ NTSTATUS ZwClose(HANDLE KeyHandle)
     }
     return STATUS_SUCCESS;
 }
+
+// ------------------------------------------------------------------
+// MMIO（BAR0）mock + 停顿计数（r600hw.c 宿主构建用）
+// ------------------------------------------------------------------
+
+unsigned char rok_mock_mmio[ROK_KMOCK_MMIO_SIZE];
+rok_mock_reg_hook_fn rok_mock_reg_read_hook = NULL;
+long rok_mock_stall_count = 0;
+long rok_mock_stall_us_total = 0;
+
+void rok_mock_mmio_reset(void)
+{
+    memset(rok_mock_mmio, 0, sizeof(rok_mock_mmio));
+    rok_mock_reg_read_hook = NULL;
+    rok_mock_stall_count = 0;
+    rok_mock_stall_us_total = 0;
+}
+
+ULONG rok_mock_read_reg(volatile ULONG *p)
+{
+    UINT_PTR addr = (UINT_PTR)p;
+    UINT_PTR base = (UINT_PTR)rok_mock_mmio;
+
+    if (addr < base || addr + sizeof(ULONG) > base + ROK_KMOCK_MMIO_SIZE)
+    {
+        fprintf(stderr, "[kmock] MMIO read outside mock BAR0: %p\n", (void *)p);
+        abort();
+    }
+    {
+        ULONG value = *(const volatile ULONG *)p;
+        ULONG offset = (ULONG)(addr - base);
+        if (rok_mock_reg_read_hook != NULL)
+        {
+            value = rok_mock_reg_read_hook(offset, value);
+        }
+        return value;
+    }
+}
+
+void rok_mock_write_reg(volatile ULONG *p, ULONG v)
+{
+    UINT_PTR addr = (UINT_PTR)p;
+    UINT_PTR base = (UINT_PTR)rok_mock_mmio;
+
+    if (addr < base || addr + sizeof(ULONG) > base + ROK_KMOCK_MMIO_SIZE)
+    {
+        fprintf(stderr, "[kmock] MMIO write outside mock BAR0: %p\n", (void *)p);
+        abort();
+    }
+    *(volatile ULONG *)p = v;
+}
+
+void KeStallExecutionProcessor(ULONG us)
+{
+    rok_mock_stall_count++;
+    rok_mock_stall_us_total += (long)us;
+}

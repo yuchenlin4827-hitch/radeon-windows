@@ -515,6 +515,11 @@ static void RokProbeVulkanIcdRegistry(void)
 #define ROK_PROBE_HAS_ESCAPE_ABI 0
 #endif
 
+// --cp-reset：显式触发一次 CP 域软复位（escape 类型 11，写硬件）。
+// 默认关：[4] 段保持纯只读观测。定义在 ABI 守卫之外（main 解析参数，
+// [4.10] 仅在 ABI 可用时消费）。
+static int g_opt_cp_reset = 0;
+
 // ---------------------------------------------------------------------------
 // [4] rokmd Escape 通道（D3DKMTEscape → DxgkDdiEscape）
 //     直接编译共享契约头 kmd/src/rok_escape.h（ROK_PROBE_HAS_ESCAPE_ABI）。
@@ -534,6 +539,8 @@ typedef union _ROK_ESC_OUT_BUF {
     ROK_ESC_SIM_STATUS_OUT    sim;
     ROK_ESC_CCC_SETTINGS      ccc;
     ROK_ESC_ENGINE_STATUS_OUT engine;
+    ROK_ESC_HW_INFO_OUT       hw;
+    ROK_ESC_HW_RESET_OUT      rst;
     unsigned char             raw[sizeof(ROK_ESCAPE_HEADER) + 296];  // 最大 = SIM_STATUS(296)
 } ROK_ESC_OUT_BUF;
 
@@ -782,6 +789,43 @@ static void RokProbeRokmdEscapeChannel(void)
                    (unsigned)out.engine.Responsive);
         }
 
+        // [4.9] QUERY_HW_INFO（M3.1：芯片识别快照 + GRBM_STATUS 只读采样）
+        RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_QUERY_HW_INFO,
+                   &out, sizeof(out.hw), &st);
+        if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+        {
+            char nameBuf[13];
+            memcpy(nameBuf, out.hw.ChipName, sizeof(out.hw.ChipName));
+            nameBuf[12] = '\0';
+            printf("  QUERY_HW    : OK  family=%s chip=%s(%u) rev=%u mmio=%u\n",
+                   RokEscFamilyName((unsigned)out.hw.Family),
+                   nameBuf, (unsigned)out.hw.Chip,
+                   (unsigned)out.hw.RevisionId, (unsigned)out.hw.MmioMapped);
+            printf("                GRBM_STATUS=0x%08X gui_active=%u cmdfifo_avail=%u\n",
+                   (unsigned)out.hw.GrbmStatus,
+                   (unsigned)out.hw.GuiActive,
+                   (unsigned)out.hw.CmdFifoAvail);
+        }
+
+        // [4.10] HW_CP_RESET（M3.2：写硬件，仅 --cp-reset 显式触发）
+        if (g_opt_cp_reset)
+        {
+            RokEscSend(pEscape, hAdapter, hDevice, ROK_ESC_TYPE_HW_CP_RESET,
+                       &out, sizeof(out.rst), &st);
+            if (st == 0 && ((ROK_ESCAPE_HEADER *)out.raw)->Magic == ROK_ESCAPE_MAGIC)
+            {
+                printf("  CP_RESET    : %s  before=0x%08X after=0x%08X wait_idle=%u\n",
+                       out.rst.Status ? "OK" : "REFUSED/FAIL",
+                       (unsigned)out.rst.GrbmStatusBefore,
+                       (unsigned)out.rst.GrbmStatusAfter,
+                       (unsigned)out.rst.WaitIdleOk);
+            }
+            else
+            {
+                printf("  CP_RESET    : escape failed (st=0x%08X)\n", (unsigned)st);
+            }
+        }
+
         if (hDevice != 0 && pDestroyDevice != NULL)
         {
             ROK_D3DKMT_DESTROYDEVICE dd;
@@ -965,8 +1009,17 @@ static void RokProbeVulkan(void)
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
-    UNREFERENCED_PARAMETER(argc);
-    UNREFERENCED_PARAMETER(argv);
+    int i;
+
+    /* --cp-reset：在 [4] 段末尾显式触发一次 CP 软复位（M3.2 实机演练）。
+     * 默认全程只读。 */
+    for (i = 1; i < argc; i++)
+    {
+        if (strcmp(argv[i], "--cp-reset") == 0)
+        {
+            g_opt_cp_reset = 1;
+        }
+    }
 
     /* 源码字符串是 UTF-8 编码；不切控制台代码页时，中文 Windows
      * （cp936/cp950）与传统 cmd 下会显示乱码。65001 即 UTF-8，

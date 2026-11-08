@@ -13,7 +13,7 @@ WDK 类型/宏后用 gcc -fsyntax-only 编译。被测内容：
 """
 import subprocess, sys, os
 
-REPO = "/home/z/my-project/radeon-windows"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DDI_C = os.path.join(REPO, "kmd/src/ddi.c")
 src = open(DDI_C, encoding="utf-8").read()
 
