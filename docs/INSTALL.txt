@@ -18,39 +18,63 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
 
 二、包内容
 ----------------------------------------------------------
-  bin\rokmd.sys        内核模式驱动（WDDM 2.0，Release x64）
-  bin\rokmd.pdb        调试符号（配合 WinDbg 使用）
-  rokmd.inf            设备信息文件（TeraScale 全家族 PCI ID 表）
-  tools\gpu_probe.exe  硬件探测工具（用户态，MSVC 构建）
-  LICENSE              MIT 许可证
+  bin\rokmd.sys          内核模式驱动（WDDM 2.0，Release x64，嵌入测试签名）
+  bin\rokmd.pdb          调试符号（配合 WinDbg 使用）
+  rokmd.inf              设备信息文件（TeraScale 全家族 PCI ID 表，
+                         stampinf 展开产物，UTF-16LE 编码）
+  rokmd.cat              目录签名文件（覆盖 INF 与 sys；v0.2.4-alpha 起随包提供）
+  rokmd-testsigning.cer  测试签名证书公钥（CI 每次构建重新生成，导入后本机信任）
+  tools\gpu_probe.exe    硬件探测工具（用户态，MSVC 构建）
+  tools\install-rokmd.ps1  一键安装 / 卸载脚本（见第三节）
+  LICENSE                MIT 许可证
 
-三、安装步骤（Windows 10/11 x64，需管理员权限）
+  ⚠️ v0.2.3-alpha 及更早的包没有 rokmd.cat 与证书 —— pnputil 必然报
+  "The third-party INF does not contain digital signature information"，
+  请换用 v0.2.4-alpha 及以上的包。
+
+三、安装步骤（Windows 10/11 x64，需管理员权限；测试签名三前提）
 ----------------------------------------------------------
-  1. 允许测试签名（本驱动未经微软 WHQL 认证）：
+  本驱动未经微软 WHQL 认证，走「测试签名」路径。三个前提缺一不可：
+
+  1. 关闭 Secure Boot（UEFI 固件设置里关）。开着时 bcdedit 会报
+     "The value is protected by Secure Boot policy"，testsigning 开不了。
+
+  2. 关闭内存完整性（HVCI）：
+     Windows 安全中心 → 设备安全性 → 内核隔离 → 内存完整性 = 关。
+     开着时测试签名内核驱动会被 Code Integrity 拦截（0xC0000428）。
+
+  3. 开启测试签名模式并重启：
 
        bcdedit /set testsigning on
 
-     重启系统，桌面右下角出现"测试模式"水印即生效。
+     重启后桌面右下角出现「测试模式」水印即生效。
 
-  2. 运行 tools\gpu_probe.exe，确认显卡 PCI ID 在支持表内。
+  4. 一键安装（推荐；自动导入证书 + pnputil）：
 
-  3. 安装驱动（二选一）：
+       powershell -ExecutionPolicy Bypass -File tools\install-rokmd.ps1
 
+     脚本会：检查上述三前提 → 清理并导入 rokmd-testsigning.cer 到
+     LocalMachine\Root 与 TrustedPublisher → pnputil /add-driver rokmd.inf /install。
+     刚开 testsigning 时脚本会提示先重启、再重跑一次。
+
+     手动等价操作：
+       Import-Certificate -FilePath .\rokmd-testsigning.cer `
+         -CertStoreLocation Cert:\LocalMachine\Root
+       Import-Certificate -FilePath .\rokmd-testsigning.cer `
+         -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
        pnputil /add-driver rokmd.inf /install
 
-     或：设备管理器 → 显示适配器 → 更新驱动程序 →
-         浏览我的电脑以查找驱动程序 → 选择本目录（含 rokmd.inf）。
-
-  4. 验证：
+  5. 验证：
        pnputil /enum-drivers          （应能看到 rokmd.inf）
        设备管理器中该显卡应显示 "Radeon Open KMD (...)"。
+       tools\gpu_probe.exe 可核对 PCI ID 与（安装后）escape 通道状态。
 
-  5.（可选）虚拟机实验：QEMU/Hyper-V/VirtualBox/VMware 中的模拟显示设备
+  6.（可选）虚拟机实验：QEMU/Hyper-V/VirtualBox/VMware 中的模拟显示设备
      （如 QEMU -device ati-vga，1002:5046）会安装到独立的"SIMULATED"驱动
      实例，强制模拟模式跑通 WDDM 管线，不触碰真实硬件。
      详见仓库 docs/simulated-device.md。
 
-  6.（可选，M3.4a）CP ring bring-up 实验（默认关闭，未开启时驱动对
+  7.（可选，M3.4a）CP ring bring-up 实验（默认关闭，未开启时驱动对
      硬件零写入）：
 
        reg add "<驱动键>\Parameters" /v EnableRing /t REG_DWORD /d 1 /f
@@ -70,14 +94,35 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
 
 五、卸载
 ----------------------------------------------------------
+       powershell -ExecutionPolicy Bypass -File tools\install-rokmd.ps1 -Uninstall
+
+     或手动：
        pnputil /enum-drivers          （找到 oemXX.inf 对应 rokmd）
        pnputil /delete-driver oemXX.inf /uninstall
   恢复正常签名模式：bcdedit /set testsigning off 后重启。
+  测试证书可留可删：certmgr.msc → 受信任的根证书颁发机构 / 受信任人
+  里删 "Radeon Open KMD Test Signing"。
 
-五、注意事项
+六、注意事项与排错（症状 → 原因 → 处理）
 ----------------------------------------------------------
+  - pnputil 报 "The third-party INF does not contain digital signature
+    information"：
+      包内缺 rokmd.cat（≤v0.2.3-alpha 的包）/ 证书未导入 / 未进测试模式。
+      → 换 v0.2.4-alpha+ 的包；确认两条 Import-Certificate 无报错；
+      确认「测试模式」水印已出现。
+  - bcdedit 报 "The value is protected by Secure Boot policy"：
+      Secure Boot 未关 → 进 UEFI 固件设置关闭后重试。
+  - 驱动包装上了，但设备黄色叹号 / 错误代码 52 / 0xC0000428：
+      内存完整性（HVCI）开着 → 关闭后重启。
+  - 设备仍显示"Microsoft 基本显示适配器"：
+      看 C:\Windows\INF\setupapi.dev.log（搜 rokmd）定位具体错误；
+      事件查看器 → Microsoft-Windows-CodeIntegrity/Operational 看签名拦截。
+  - 屏幕黑掉 / 无输出：
+      render-only 驱动接管唯一显示 GPU 的已知风险 → 进安全模式执行卸载
+      （WinRE → 疑难解答 → 启动设置 → 安全模式）。
+
   - 当前版本为 M3.4a：M2 全量 WDDM 2.0 DDI/escape/模拟设备 + CP 微码
     内嵌与 ring 初始化观测路径（默认关闭）；尚不具备真实渲染能力；
     真实 ring 提交是 M3.4b，UMD（terakan Vulkan）接入是 M4 里程碑。
-  - 若安装后出现异常，进入安全模式执行"卸载"步骤即可恢复。
+    详见 docs/roadmap.md。
   - 请勿在生产环境使用；实验环境建议先做系统还原点。

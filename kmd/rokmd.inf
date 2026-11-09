@@ -11,8 +11,11 @@
 ;
 ; 注意：骨架阶段（M2）对所有这些卡只做"识别与加载"，硬件能力按家族在
 ; M3+ 逐步落地（优先 Seymour/Caicos）。装卡前请用 gpu_probe.exe 核对实际 DEV ID。
-; 测试签名环境安装：bcdedit /set testsigning on 后重启，再
-;   pnputil /add-driver rokmd.inf /install
+; 测试签名环境安装（三前提）：UEFI 关 Secure Boot → 关内存完整性(HVCI) →
+;   bcdedit /set testsigning on 并重启（测试模式水印）；随后导入包内
+;   rokmd-testsigning.cer 到 LocalMachine\Root 与 TrustedPublisher，
+;   再 pnputil /add-driver rokmd.inf /install。
+; 一键脚本：包内 tools\install-rokmd.ps1（详见 docs/INSTALL.txt）。
 ;--*/
 
 [Version]
