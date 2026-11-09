@@ -155,10 +155,12 @@ jobs:
           # 3) inf2cat 生成 rokmd.cat（10_X64 覆盖 Win10/11 x64）
           & $inf2cat /driver:pkgdrv /os:10_X64 /uselocaltime
           if ($LASTEXITCODE -ne 0) { throw 'inf2cat failed' }
-          # 4) 签 cat 并导出公钥
+          # 4) 签 cat 并导出公钥；把已签名的 sys 回拷到包根（zip 里必须是
+          #    内嵌签名版本，pkgdrv 是唯一被签名的副本）
           & $signtool sign /fd sha256 /td sha256 /tr http://timestamp.digicert.com /f $pfx /p rok-test-sign pkgdrv\rokmd.cat
           if ($LASTEXITCODE -ne 0) { throw 'signtool sign rokmd.cat failed' }
           Copy-Item pkgdrv\rokmd.cat package\
+          Copy-Item pkgdrv\rokmd.sys package\rokmd.sys -Force
           Export-Certificate -Cert $cert -FilePath package\rokmd.cer | Out-Null
           Get-ChildItem package -Recurse | ForEach-Object { Write-Host $_.FullName }
 
