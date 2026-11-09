@@ -1,49 +1,104 @@
-Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
+Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha，v0.2.4-alpha）
 ======================================================
+
+零、最短路径（一键安装）
+----------------------------------------------------------
+  1. 解压后，右键 install.cmd → "以管理员身份运行"。
+     脚本自动完成：导入包内测试证书（rokmd.cer）→ 启用测试签名模式
+     （testsigning）→ pnputil 安装驱动包。
+     首次启用测试签名会提示重启：重启后再运行一次 install.cmd 即可
+     （第二次会直接执行安装步骤）。
+  2. 绑定设备：见"三、3"（设备管理器"从磁盘安装"强制切换 —— Windows
+     不会自动用本驱动替换现有官方 AMD 驱动，这是预期行为，不是失败）。
+  3. 观测：tools\gpu_probe.exe；卸载：右键 uninstall.cmd（管理员）。
+
+  两个前提（不满足时内核会拒绝加载测试签名驱动）：
+     - BIOS 关闭 Secure Boot（否则 bcdedit /set testsigning on 会报
+       "The value is protected by Secure Boot policy"）；
+     - 关闭 HVCI / 内核隔离"内存完整性"：Windows 安全中心 → 设备安全性
+       → 内核隔离 → 内存完整性 = 关（重启生效）。install.cmd 会自动
+       检测 HVCI 并给出提示。
 
 一、适用硬件（AMD TeraScale 系列，PCI 供应商 ID VEN_1002）
 ----------------------------------------------------------
   移动系列（Seymour/Caicos，0x6760-0x677B）：
-      HD 6490M（Seymour XT，0x6768；部分机型为 Caicos 0x6766/0x6767）、
-      HD 7470M（Caicos XT，0x6778）、
-      HD 6400M / 6430M / 6470M / 6450A / 7450A / 7470 / 8470 等
+      HD 7470M（0x6760 / 0x6778，用户实测机型为 Seymour 0x6760，
+      SUBSYS_20021043）、HD 6490M（Seymour XT 0x6768；部分机型为
+      Caicos 0x6766/0x6767）、HD 6400M / 6430M / 6470M / 6450A /
+      7450A / 7470 / 8470 等
   Llano APU 内显（Sumo/SuperSumo，0x9640-0x964F）：
       HD 6380G / 6410D / 6480G / 6520G / 6550D / 6620G 等
   桌面独显（TeraScale 1/2/3 全家族，INF 共覆盖 300+ 设备 ID）：
-      HD 4800（RV770）/ HD 5770（Juniper）/ HD 6850-6870（Barts）/ HD 6970（Cayman）
-      以及 HD 2000-4000 / HD 5000 / HD 6400-6900 全系列
+      HD 4800（RV770）/ HD 5770（Juniper）/ HD 6850-6870（Barts）/
+      HD 6970（Cayman）以及 HD 2000-4000 / HD 5000 / HD 6400-6900 全系列
 
   不确定自己的卡？先运行 tools\gpu_probe.exe，它会列出
   PCI 供应商/设备 ID、当前驱动与 Vulkan 状态，然后对照 rokmd.inf 的支持表。
 
-二、包内容
+二、包内容（v0.2.4 起为扁平布局 + 签名件）
 ----------------------------------------------------------
-  bin\rokmd.sys        内核模式驱动（WDDM 2.0，Release x64）
-  bin\rokmd.pdb        调试符号（配合 WinDbg 使用）
-  rokmd.inf            设备信息文件（TeraScale 全家族 PCI ID 表）
-  tools\gpu_probe.exe  硬件探测工具（用户态，MSVC 构建）
-  LICENSE              MIT 许可证
+  rokmd.sys             内核模式驱动（WDDM 2.0，Release x64，
+                        内嵌测试签名 Authenticode）
+  rokmd.inf             设备信息文件（TeraScale 全家族 PCI ID 表）
+  rokmd.cat             驱动目录文件（inf2cat 生成，测试证书签名，
+                        pnputil 校验的就是它）
+  rokmd.cer             测试签名证书公钥（install.cmd 自动导入
+                        "受信任的根证书颁发机构"+"受信任的发布者"）
+  install.cmd           一键安装入口（管理员运行，调用 tools\install.ps1）
+  uninstall.cmd         一键卸载入口（调用 tools\uninstall.ps1）
+  tools\install.ps1     安装脚本主体
+  tools\uninstall.ps1   卸载脚本主体
+  tools\gpu_probe.exe   硬件探测工具（用户态，MSVC 构建）
+  tools\rokmd.pdb       调试符号（配合 WinDbg 使用）
+  INSTALL.txt / LICENSE
 
-三、安装步骤（Windows 10/11 x64，需管理员权限）
+  注意：rokmd.inf / rokmd.sys / rokmd.cat 必须保持同目录——DriverStore
+  导入时按 INF 的 SourceDisksFiles 相对路径解析文件，拆开会导致
+  "驱动程序包缺少文件"错误。
+
+三、安装步骤（Windows 10/11 x64，需管理员权限；一键见"零"）
 ----------------------------------------------------------
-  1. 允许测试签名（本驱动未经微软 WHQL 认证）：
+  0. 前提检查：
+     a) BIOS 关闭 Secure Boot；
+     b) 关闭 HVCI/内存完整性（见"零"）；
+     c) 建议先创建系统还原点。
 
+  1. 允许测试签名 + 导入证书（一键）：
+
+       install.cmd
+
+     等价手动操作：
+
+       certutil -addstore -f Root rokmd.cer
+       certutil -addstore -f TrustedPublisher rokmd.cer
        bcdedit /set testsigning on
 
      重启系统，桌面右下角出现"测试模式"水印即生效。
 
   2. 运行 tools\gpu_probe.exe，确认显卡 PCI ID 在支持表内。
 
-  3. 安装驱动（二选一）：
+  3. 安装驱动包并绑定设备：
+     a) 安装（一键或手动）：
 
-       pnputil /add-driver rokmd.inf /install
+          pnputil /add-driver rokmd.inf /install
 
-     或：设备管理器 → 显示适配器 → 更新驱动程序 →
-         浏览我的电脑以查找驱动程序 → 选择本目录（含 rokmd.inf）。
+        成功后包已进入驱动仓库：pnputil /enum-drivers 应能看到
+        rokmd.inf（oemXX.inf 形式）。此时设备不会自动切换——
+        现有官方 AMD 驱动的硬件 ID 匹配等级（带 SUBSYS/REV 装饰）
+        高于本 INF 的通用匹配，Windows 只对"无驱动设备"或"更优
+        匹配"自动安装。
+     b) 强制绑定（从磁盘安装）：
+          设备管理器 → 显示适配器 → 你的 AMD 卡 → 更新驱动程序 →
+          浏览我的电脑以查找驱动程序 → 让我从可用驱动程序列表中
+          选取 → 从磁盘安装 → 选择本目录的 rokmd.inf → 安装。
+          弹出"Windows 无法验证此驱动程序发布者"时选"始终安装"
+          （证书已导入受信任的发布者，正常不会再弹）。
 
   4. 验证：
        pnputil /enum-drivers          （应能看到 rokmd.inf）
        设备管理器中该显卡应显示 "Radeon Open KMD (...)"。
+       tools\gpu_probe.exe 的 [4.x] escape 段可达即 KMD 已加载
+       （非 rokmd 适配器报 0xC0000001 属预期）。
 
   5.（可选）虚拟机实验：QEMU/Hyper-V/VirtualBox/VMware 中的模拟显示设备
      （如 QEMU -device ati-vga，1002:5046）会安装到独立的"SIMULATED"驱动
@@ -70,14 +125,28 @@ Radeon Open KMD (rokmd) — 安装说明（测试版 / Alpha）
 
 五、卸载
 ----------------------------------------------------------
-       pnputil /enum-drivers          （找到 oemXX.inf 对应 rokmd）
-       pnputil /delete-driver oemXX.inf /uninstall
-  恢复正常签名模式：bcdedit /set testsigning off 后重启。
+       右键 uninstall.cmd（管理员），或等价手动操作：
 
-五、注意事项
+       pnputil /enum-drivers          （找到 oemXX.inf 对应 rokmd）
+       pnputil /delete-driver oemXX.inf /uninstall /force
+
+  若设备仍绑定 rokmd：设备管理器 → 该卡 → 右键卸载设备（勾选"删除此
+  设备的驱动程序软件"）→ 扫描检测硬件改动，让系统装回官方驱动。
+  恢复正式签名模式：bcdedit /set testsigning off 后重启。
+  （uninstall.cmd -OffTestsig 可同时关闭测试签名。）
+
+六、注意事项
 ----------------------------------------------------------
+  - 签名说明：本驱动未经微软 WHQL/硬件开发中心认证，采用"自签测试
+    证书 + testsigning"方案。每次 Release 的测试证书独立生成，公钥
+    即包内 rokmd.cer；证书只影响显式导入过它的机器，不信任任何第三
+    方二进制。想还原时删除两张证书表中的 "radeon-open-kmd-test" 即可。
+  - 双显卡机型（如 Llano iGPU + Seymour dGPU）：显示通路通常在
+    iGPU/APU 上，切换独显驱动不影响主显示输出；若你的机器独显直连，
+    绑定后可能出现短暂黑屏或无输出，请准备好安全模式回退。
+  - 绑定后设备出现黄色感叹号/代码 43 属 alpha 阶段预期（M3.4a 尚无
+    真实渲染能力）；安全模式执行"卸载"步骤即可恢复。
   - 当前版本为 M3.4a：M2 全量 WDDM 2.0 DDI/escape/模拟设备 + CP 微码
     内嵌与 ring 初始化观测路径（默认关闭）；尚不具备真实渲染能力；
     真实 ring 提交是 M3.4b，UMD（terakan Vulkan）接入是 M4 里程碑。
-  - 若安装后出现异常，进入安全模式执行"卸载"步骤即可恢复。
   - 请勿在生产环境使用；实验环境建议先做系统还原点。

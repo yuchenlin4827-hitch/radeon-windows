@@ -11,7 +11,8 @@
 ;
 ; 注意：骨架阶段（M2）对所有这些卡只做"识别与加载"，硬件能力按家族在
 ; M3+ 逐步落地（优先 Seymour/Caicos）。装卡前请用 gpu_probe.exe 核对实际 DEV ID。
-; 测试签名环境安装：bcdedit /set testsigning on 后重启，再
+; 测试签名环境安装：包内 install.cmd 一键完成（证书导入 + testsigning
+; + pnputil），或手动：bcdedit /set testsigning on 后重启，再
 ;   pnputil /add-driver rokmd.inf /install
 ;--*/
 
